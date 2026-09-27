@@ -28,8 +28,6 @@ services:
       postgres: { condition: service_healthy }
   app:
     image: *image
-    # Pulls the published image; `docker compose up --build` builds it from a clone instead.
-    build: .
     environment:
       DATABASE_URL: *database-url
       # Caddy is the only way in, so the app takes its address from Caddy's forwarded headers and
