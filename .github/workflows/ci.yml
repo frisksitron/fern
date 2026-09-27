@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Formatting, types, and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ffmpeg
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm check
+      - name: Unit and ffprobe integration tests
+        run: pnpm test
+      - name: Production build
+        run: pnpm build
+      - name: Migrations and generated Zero schema match the Drizzle schema
+        run: |
+          pnpm dbgenerate
+          pnpm zerogenerate
+          git add --intent-to-add --all migrations src/lib/zero
+          git diff --exit-code -- migrations src/lib/zero
+
+  database:
+    name: PostgreSQL tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start PostgreSQL
+        run: docker compose -f docker-compose.dev.yml up --detach --wait postgres
+      - run: pnpm test:db
+
+  e2e:
+    name: Playwright
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ffmpeg
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm mockmedia
+      - name: Start PostgreSQL and apply migrations
+        run: |
+          docker compose -f docker-compose.dev.yml up --detach --wait postgres
+          pnpm dbmigrate
+      - name: Start the dev server
+        # zero-cache reaches the app through host.docker.internal, which on Linux is the
+        # Docker bridge gateway, so Vite must listen beyond loopback.
+        run: |
+          pnpm dev --host 0.0.0.0 > dev-server.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl --silent --fail http://127.0.0.1:5173/health/ready && exit 0
+            sleep 1
+          done
+          cat dev-server.log
+          exit 1
+      - name: Start zero-cache
+        run: docker compose -f docker-compose.dev.yml up --detach --wait
+      - run: pnpm e2e
+      - name: Upload Playwright results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-results
+          path: |
+            playwright-report/
+            test-results/
+            dev-server.log
+          retention-days: 14
+      - name: Show service logs
+        if: ${{ failure() }}
+        run: docker compose -f docker-compose.dev.yml logs --no-color
+
+  image:
+    name: Publish Docker image
+    needs: [checks, database, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

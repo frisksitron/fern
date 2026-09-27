@@ -1,0 +1,234 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-fern-accent: #ff5a1f;
+  --color-fern-accent-hover: #ff713d;
+  --color-fern-accent-strong: #ff5a1f;
+  --color-fern-accent-strong-hover: #e84a12;
+  --color-fern-bg: #f4f4ef;
+  --color-fern-panel: #ffffff;
+  --font-sans: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+@layer base {
+  html {
+    background: var(--color-fern-bg);
+  }
+
+  html {
+    /* A soft tap flash instead of the platform's grey box; double-tap no longer zooms. */
+    -webkit-tap-highlight-color: rgb(255 90 31 / 0.15);
+    touch-action: manipulation;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-fern-bg);
+    color: #171717;
+    font-size: 16px;
+    line-height: 24px;
+    /* Landscape phones: keep content out from under the notch (the viewport uses `viewport-fit=cover`). */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+
+  /* iOS zooms into any focused field smaller than 16px. */
+  @media (pointer: coarse) {
+    input,
+    select,
+    textarea {
+      font-size: max(16px, 1em);
+    }
+  }
+
+  /* A styled <progress> loses its native look; give it Fern's colours rather than the fallback green. */
+  progress {
+    appearance: none;
+    background: rgb(255 255 255 / 0.35);
+  }
+
+  progress::-webkit-progress-bar {
+    background: rgb(255 255 255 / 0.35);
+  }
+
+  progress::-webkit-progress-value {
+    background: var(--color-fern-accent);
+  }
+
+  progress::-moz-progress-bar {
+    background: var(--color-fern-accent);
+  }
+
+  ::selection {
+    background: #ff5a1f;
+    color: #000;
+  }
+}
+
+@utility player-control {
+  @apply h-11 min-w-11 shrink-0 items-center justify-center overflow-hidden rounded-md transition;
+}
+
+@utility player-passive {
+  --media-control-hover-background: transparent;
+}
+
+/* Captions move above the watch page's control bar while it shows (Chromium and WebKit). */
+media-controller video::-webkit-media-text-track-container {
+  transition: transform 150ms ease;
+}
+
+media-controller:not([userinactive]) video::-webkit-media-text-track-container {
+  transform: translateY(-5rem);
+}
+
+/* Positioned ASS signs (see `SIGN_SCALE` in src/lib/server/playback/ass.ts). */
+video::cue(.sign) {
+  font-size: 65%;
+}
+
+.music-range {
+  height: 12px;
+  cursor: pointer;
+  appearance: none;
+  background: transparent;
+}
+
+.music-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #ff5a1f var(--range-progress, 0%), #9b9b95 var(--range-progress, 0%));
+}
+
+.music-range::-webkit-slider-thumb {
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: #171717;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.music-range:hover::-webkit-slider-thumb,
+.music-range:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+.music-range::-moz-range-track {
+  height: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: #9b9b95;
+}
+
+.music-range::-moz-range-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: #ff5a1f;
+}
+
+.music-range::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 999px;
+  background: #171717;
+}
+
+.music-seek {
+  height: 16px;
+}
+
+.music-seek::-webkit-slider-runnable-track {
+  height: 5px;
+  box-shadow: 0 0 12px rgb(137 185 167 / 0.08);
+}
+
+.music-seek::-webkit-slider-thumb {
+  width: 13px;
+  height: 13px;
+  margin-top: -4px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+}
+
+@media (pointer: coarse) {
+  .music-seek {
+    height: 24px;
+  }
+
+  /* No hover on touch: show the thumb, so the bar reads as something to drag. */
+  .music-seek::-webkit-slider-thumb {
+    opacity: 1;
+  }
+}
+
+.music-seek::-moz-range-track,
+.music-seek::-moz-range-progress {
+  height: 5px;
+}
+
+.music-seek::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+}
+
+.playing-indicator {
+  display: flex;
+  height: 14px;
+  align-items: end;
+  gap: 2px;
+}
+
+.playing-indicator i {
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: scaleY(0.4);
+  transform-origin: bottom;
+}
+
+.playing-indicator i:nth-child(2) {
+  transform: scaleY(0.75);
+}
+.playing-indicator i:nth-child(3) {
+  transform: scaleY(0.55);
+}
+.playing-indicator.playing i {
+  animation: playing-bar 0.7s ease-in-out infinite alternate;
+}
+.playing-indicator.playing i:nth-child(2) {
+  animation-delay: -0.45s;
+}
+.playing-indicator.playing i:nth-child(3) {
+  animation-delay: -0.2s;
+}
+
+@keyframes playing-bar {
+  from {
+    transform: scaleY(0.25);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playing-indicator.playing i {
+    animation: none;
+  }
+}

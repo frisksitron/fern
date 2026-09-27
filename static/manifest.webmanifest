@@ -1,0 +1,44 @@
+{
+  "id": "/",
+  "name": "Fern",
+  "short_name": "Fern",
+  "description": "Your personal media library",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f4ef",
+  "theme_color": "#f4f4ef",
+  "categories": ["entertainment", "music", "video"],
+  "icons": [
+    {
+      "src": "/fern-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/fern-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/fern-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Music",
+      "url": "/music",
+      "icons": [{ "src": "/fern-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Video",
+      "url": "/browse",
+      "icons": [{ "src": "/fern-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

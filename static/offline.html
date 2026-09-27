@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f4f4ef" />
+    <title>Fern · Offline</title>
+    <link rel="icon" href="/fern-icon.svg" type="image/svg+xml" />
+    <style>
+      html {
+        background: #f4f4ef;
+        color: #171717;
+        font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+        -webkit-tap-highlight-color: rgb(255 90 31 / 0.15);
+      }
+      body {
+        display: grid;
+        min-height: 100svh;
+        margin: 0;
+        padding: 24px max(24px, env(safe-area-inset-right)) 24px max(24px, env(safe-area-inset-left));
+        box-sizing: border-box;
+        place-content: center;
+        text-align: center;
+      }
+      p {
+        margin: 0;
+      }
+      .brand {
+        margin-bottom: 12px;
+        font-size: 14px;
+        font-weight: 700;
+        color: #c93600;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 24px;
+      }
+      .hint {
+        max-width: 32ch;
+        margin: 0 auto 32px;
+        font-size: 14px;
+        line-height: 22px;
+        color: #6b6b67;
+      }
+      button {
+        min-height: 44px;
+        padding: 0 20px;
+        border: 1px solid #000;
+        background: #ff5a1f;
+        color: #000;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <p class="brand">[fern]</p>
+    <h1>Can't reach Fern</h1>
+    <p class="hint">Fern lives on your home server. Check your connection or VPN, then try again.</p>
+    <p><button type="button" onclick="location.reload()">Try again</button></p>
+    <script>
+      addEventListener('online', () => location.reload());
+    </script>
+  </body>
+</html>

@@ -1,0 +1,113 @@
+# Self-hosting Fern. Settings come from .env; see .env.example.
+x-image: &image ghcr.io/frisksitron/fern:${FERN_VERSION:-latest}
+x-database-url: &database-url postgres://fern:${POSTGRES_PASSWORD:-fern}@postgres:5432/fern
+
+services:
+  postgres:
+    image: postgres:18.3-alpine
+    command: postgres -c wal_level=logical
+    environment:
+      POSTGRES_DB: fern
+      POSTGRES_USER: fern
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fern}
+    volumes: [postgres-data:/var/lib/postgresql]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U fern]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  migrate:
+    image: *image
+    command: node node_modules/drizzle-kit/bin.cjs migrate
+    # A one-shot job, not a server, so the image's health check doesn't apply.
+    healthcheck: { disable: true }
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres: { condition: service_healthy }
+  app:
+    image: *image
+    # Pulls the published image; `docker compose up --build` builds it from a clone instead.
+    build: .
+    environment:
+      DATABASE_URL: *database-url
+      # Caddy is the only way in, so the app takes its address from Caddy's forwarded headers and
+      # works at whatever address you open it with.
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
+      HLS_CACHE_DIR: /cache/hls
+      THUMBNAIL_CACHE_DIR: /cache/thumbnails
+      BROWSE_ROOTS: ${BROWSE_ROOTS:-/media}
+      # Empty values fall back to the server defaults in src/lib/server/config.ts.
+      HLS_CACHE_MAX_BYTES: ${HLS_CACHE_MAX_BYTES:-}
+      HLS_CACHE_MAX_AGE_HOURS: ${HLS_CACHE_MAX_AGE_HOURS:-}
+      THUMBNAIL_CACHE_MAX_BYTES: ${THUMBNAIL_CACHE_MAX_BYTES:-}
+      THUMBNAIL_CACHE_MAX_AGE_HOURS: ${THUMBNAIL_CACHE_MAX_AGE_HOURS:-}
+      MAX_CONCURRENT_TRANSCODES: ${MAX_CONCURRENT_TRANSCODES:-}
+      TRANSCODE_MAX_WAITING: ${TRANSCODE_MAX_WAITING:-}
+      TRANSCODE_THREADS: ${TRANSCODE_THREADS:-}
+      TRANSCODE_ACCELERATOR: ${TRANSCODE_ACCELERATOR:-}
+      SCAN_PROBE_CONCURRENCY: ${SCAN_PROBE_CONCURRENCY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      # Open requests get this many seconds to finish on shutdown; the rest of stop_grace_period
+      # covers handing a running scan back and closing the database pool.
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-10}
+    volumes:
+      - ${MEDIA_PATH:?Set MEDIA_PATH in .env to the folder with your media}:/media:ro
+      - hls-cache:/cache/hls
+      - thumbnail-cache:/cache/thumbnails
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    stop_grace_period: 30s
+  zero-cache:
+    image: rocicorp/zero:1.9.0
+    environment:
+      ZERO_UPSTREAM_DB: *database-url
+      ZERO_CVR_DB: *database-url
+      ZERO_CHANGE_DB: *database-url
+      ZERO_REPLICA_FILE: /data/replica.db
+      ZERO_ADMIN_PASSWORD: ${ZERO_ADMIN_PASSWORD:-fern}
+      ZERO_QUERY_URL: http://app:3000/api/zero/query
+      ZERO_MUTATE_URL: http://app:3000/api/zero/mutate
+      ZERO_ENABLE_CRUD_MUTATIONS: 'false'
+      ZERO_APP_PUBLICATIONS: fern_data
+    volumes: [zero-data:/data]
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      app: { condition: service_started }
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:4848/keepalive]
+      interval: 5s
+      start_period: 10m
+    stop_grace_period: 10m
+  caddy:
+    image: caddy:2.11.2-alpine
+    ports: ['${PORT:-8080}:80']
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    restart: unless-stopped
+    depends_on: [app, zero-cache]
+
+configs:
+  caddyfile:
+    content: |
+      :80 {
+        encode zstd gzip
+        handle_path /zero/* {
+          reverse_proxy zero-cache:4848
+        }
+        handle {
+          reverse_proxy app:3000
+        }
+      }
+
+volumes:
+  postgres-data:
+  zero-data:
+  hls-cache:
+  thumbnail-cache:

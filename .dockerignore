@@ -1,0 +1,13 @@
+.git
+node_modules
+.svelte-kit
+build
+coverage
+playwright-report
+test-results
+.env
+.cache
+mock-media
+.playwright-mcp
+.pi
+.cursor

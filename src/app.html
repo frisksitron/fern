@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" class="[scrollbar-gutter:stable]">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="application-name" content="Fern" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Fern" />
+    <link rel="icon" href="/fern-icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/fern-apple-touch.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    %sveltekit.head%
+  </head>
+  <body
+    class="min-h-full min-w-80 bg-fern-bg font-sans leading-relaxed text-black [color-scheme:light]"
+    data-sveltekit-preload-data="hover"
+  >
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

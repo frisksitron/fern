@@ -1,0 +1,11 @@
+# Keep LF endings on every platform so formatting checks match a clean checkout.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.mp4 binary
+*.mkv binary
+*.webm binary

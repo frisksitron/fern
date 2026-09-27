@@ -1,0 +1,11 @@
+allowBuilds:
+  # Native better-sqlite3 binding (node-gyp-build) that zero-cache uses for its replica.
+  '@rocicorp/zero-sqlite3': true
+  # Verifies the platform esbuild binary that drizzle-kit and tsx use.
+  esbuild: true
+  # Only warns about dependents' version ranges; nothing needs it.
+  protobufjs: false
+
+# One copy of the pg types, so a Pool built here type-checks against Zero's pg adapter.
+overrides:
+  '@types/pg': 8.23.1
