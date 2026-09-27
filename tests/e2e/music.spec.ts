@@ -99,6 +99,7 @@ test('reorders a playlist by dragging a song’s handle or with Alt and the arro
   await expect.poll(savedOrder).toBe('Blue Signal,Glass City,Blue Hour');
 
   await page.reload();
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
   await expect.poll(shownOrder).toEqual(['Blue Signal', 'Glass City', 'Blue Hour']);
 
   // Releasing outside the list drops the track where it is shown, and ends the drag.
@@ -177,6 +178,7 @@ test('selects, acts on, and plays songs the same way in folders, search, and pla
 
   // Search: each song's ⋯ menu leads to its folder.
   await page.goto('/music/search?q=glass');
+  await expect(page.locator('main[data-hydrated="true"]')).toBeVisible();
   await row('Glass City').getByRole('button', { name: 'More actions for Glass City' }).click();
   await page.getByRole('menuitem', { name: 'Show in folder' }).click();
   await expect(page).toHaveURL(new RegExp(`/music/${musicRootId}/${albumId}$`));
