@@ -95,13 +95,13 @@ configs:
   caddyfile:
     content: |
       :80 {
-        encode zstd gzip
-        handle_path /zero/* {
-          reverse_proxy zero-cache:4848
-        }
-        handle {
-          reverse_proxy app:3000
-        }
+      	encode zstd gzip
+      	handle_path /zero/* {
+      		reverse_proxy zero-cache:4848
+      	}
+      	handle {
+      		reverse_proxy app:3000
+      	}
       }
 
 volumes:
