@@ -17,7 +17,7 @@ pnpm dev
 
 Open `http://127.0.0.1:5173`, create a profile, open **Media settings**, add the absolute `mock-media` path, and scan. Stop the app with Ctrl+C and the containers with `docker compose -f docker-compose.dev.yml down`.
 
-Development needs no `.env` file; the defaults point at the dev containers. The server also reads `DATABASE_URL`, `PUBLIC_ZERO_URL`, `HLS_CACHE_DIR`, `THUMBNAIL_CACHE_DIR`, `FFMPEG_PATH`, and `FFPROBE_PATH`, which `docker-compose.yml` sets for you; their defaults are in `src/lib/server/config.ts`. To try the production image from the clone, build it under the published name with `docker build -t ghcr.io/frisksitron/fern:latest .`, then run `docker compose up -d`; `docker-compose.yml` deliberately has no `build:` entry, because tools such as Compose Manager, Portainer, and Dockge rebuild any service that has one instead of pulling it.
+Development needs no `.env` file; the defaults point at the dev containers. The server also reads `DATABASE_URL`, `PUBLIC_ZERO_URL`, `HLS_CACHE_DIR`, `THUMBNAIL_CACHE_DIR`, `TRACK_MAP_CACHE_DIR`, `FFMPEG_PATH`, and `FFPROBE_PATH`, which `docker-compose.yml` sets for you; their defaults are in `src/lib/server/config.ts`. To try the production image from the clone, build it under the published name with `docker build -t ghcr.io/frisksitron/fern:latest .`, then run `docker compose up -d`; `docker-compose.yml` deliberately has no `build:` entry, because tools such as Compose Manager, Portainer, and Dockge rebuild any service that has one instead of pulling it.
 
 ## Checks and tests
 

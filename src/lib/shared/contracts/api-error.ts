@@ -34,6 +34,8 @@ export const ApiErrorCode = Schema.Literals([
   'transcode.failed',
   'transcode.timed_out',
   'thumbnail.unavailable',
+  'track_map.busy',
+  'track_map.unavailable',
   'music.folder_too_large',
   'scan.not_found',
   'scan.already_running',

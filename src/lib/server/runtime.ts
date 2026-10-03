@@ -9,12 +9,23 @@ import { Playback } from './playback/service';
 import { ScanEvents } from './scans/events';
 import { Scans } from './scans/service';
 import { Thumbnails } from './thumbnails/service';
+import { TrackMaps } from './track-maps/service';
 import { Transcoding } from './transcoding/service';
 import { ZeroServer } from './zero/service';
 
 /** Services available to route handlers and page loads. */
 export type AppServices =
-  Database | MediaRoots | MediaLibrary | Playback | Scans | ScanEvents | Transcoding | Thumbnails | Health | ZeroServer;
+  | Database
+  | MediaRoots
+  | MediaLibrary
+  | Playback
+  | Scans
+  | ScanEvents
+  | Transcoding
+  | Thumbnails
+  | TrackMaps
+  | Health
+  | ZeroServer;
 
 // Each service's `layer` wires its own dependencies. Layers are shared by reference, so a
 // dependency used by several services (the process runner, the scan worker) is built once. The
@@ -34,6 +45,7 @@ const AppLayer: Layer.Layer<AppServices> = Layer.mergeAll(
   Scans.layer,
   Transcoding.layer,
   Thumbnails.layer,
+  TrackMaps.layer,
   Health.layer,
   ZeroServer.layer,
 ).pipe(Layer.provideMerge(Infrastructure), Layer.provide(Logging));

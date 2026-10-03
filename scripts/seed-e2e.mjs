@@ -55,11 +55,23 @@ await query(`
     deleted_at = null
 `);
 
-// A music root with catalog rows only, in a disposable folder: enough for browsing, search, and
-// playlists without audio files. No test scans it.
+// A music root with catalog rows, in a disposable folder: enough for browsing, search, and
+// playlists. No test scans it. Only Blue Hour has audio, for the visual effects: a quiet tone, then
+// a louder chorus with a kick every half second.
 const musicRootId = '20000000-0000-4000-8000-000000000003';
 const musicPath = path.join(root, '.cache', 'e2e', 'music').replaceAll('\\', '/');
-await mkdir(musicPath, { recursive: true });
+const blueHourFile = path.join(musicPath, 'Night Drive', 'Neon', '01 Blue Hour.flac');
+await mkdir(path.dirname(blueHourFile), { recursive: true });
+try {
+  await access(blueHourFile);
+} catch {
+  const song =
+    '0.05*sin(2*PI*440*t)+between(t,8,16)*(0.15*sin(2*PI*440*t)+0.6*exp(-mod(t,0.5)/0.08)*sin(2*PI*60*mod(t,0.5)))';
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `aevalsrc='${song}':s=44100:d=20`];
+  await completed(
+    spawn(process.env.FFMPEG_PATH ?? 'ffmpeg', [...args, '-c:a', 'flac', blueHourFile], { stdio: 'inherit' }),
+  );
+}
 await query(`
   insert into media_roots (id, path, display_name, media_type, display_order)
   values ('${musicRootId}', '${musicPath.replaceAll("'", "''")}', 'Test music', 'music', 98)

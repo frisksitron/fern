@@ -40,6 +40,11 @@ export type ProcessRequest = {
   readonly timeout: Duration.Input;
   /** Collects stdout up to this many bytes; more terminates the process. Omit to discard stdout. */
   readonly maxStdoutBytes?: number;
+  /**
+   * Receives stdout as it arrives instead of collecting it (the output's `stdout` is then empty),
+   * for output too big to hold. If it throws, the run dies and the process is terminated.
+   */
+  readonly onStdout?: (chunk: Buffer) => void;
 };
 
 type ProcessOutput = {
@@ -138,7 +143,11 @@ const makeRunner = (executables: Readonly<Record<MediaProgram, string>>, options
               const spawned = spawn(executables[request.program], [...request.args], {
                 shell: false,
                 windowsHide: true,
-                stdio: ['ignore', request.maxStdoutBytes === undefined ? 'ignore' : 'pipe', 'pipe'],
+                stdio: [
+                  'ignore',
+                  request.maxStdoutBytes === undefined && !request.onStdout ? 'ignore' : 'pipe',
+                  'pipe',
+                ],
               });
               live.add(spawned);
               spawned.once('exit', () => live.delete(spawned));
@@ -151,7 +160,17 @@ const makeRunner = (executables: Readonly<Record<MediaProgram, string>>, options
             const stdout: Buffer[] = [];
             let stdoutBytes = 0;
             let stderr = '';
+            let receiving = true;
             child.stdout?.on('data', (chunk: Buffer) => {
+              if (request.onStdout) {
+                try {
+                  if (receiving) request.onStdout(chunk);
+                } catch (cause) {
+                  receiving = false;
+                  resume(Effect.die(cause));
+                }
+                return;
+              }
               stdoutBytes += chunk.length;
               if (request.maxStdoutBytes !== undefined && stdoutBytes > request.maxStdoutBytes) {
                 resume(

@@ -72,6 +72,39 @@ describe('MediaProcessRunner', () => {
     expect(result.success.durationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it('streams stdout to onStdout as it arrives instead of collecting it', async () => {
+    const chunks: Buffer[] = [];
+    const result = await run(
+      script('process.stdout.write("x".repeat(200000));', { onStdout: (chunk) => chunks.push(chunk) }),
+    );
+    expect(result._tag).toBe('Success');
+    if (result._tag !== 'Success') return;
+    expect(result.success.stdout.length).toBe(0);
+    expect(Buffer.concat(chunks).toString()).toBe('x'.repeat(200000));
+  });
+
+  it('dies and terminates the process when onStdout throws', async () => {
+    const task = longRunning('stdout-throws');
+    const result = await Effect.runPromise(
+      Effect.exit(
+        Effect.provide(
+          MediaProcessRunner.use((runner) =>
+            runner.run(
+              script(`${task.source} process.stdout.write("frames");`, {
+                onStdout: () => {
+                  throw new Error('unreadable');
+                },
+              }),
+            ),
+          ),
+          nodeRunner,
+        ),
+      ),
+    );
+    expect(Exit.isFailure(result) && Exit.hasDies(result)).toBe(true);
+    expect(isAlive(await task.pid())).toBe(false);
+  });
+
   it('reports a non-zero exit with its code and stderr', async () => {
     const result = await run(script('process.stderr.write("broken input"); process.exit(3);'));
     expect(result).toMatchObject({

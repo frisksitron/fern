@@ -36,12 +36,15 @@ services:
       HOST_HEADER: x-forwarded-host
       HLS_CACHE_DIR: /cache/hls
       THUMBNAIL_CACHE_DIR: /cache/thumbnails
+      TRACK_MAP_CACHE_DIR: /cache/track-maps
       BROWSE_ROOTS: ${BROWSE_ROOTS:-/media}
       # Empty values fall back to the server defaults in src/lib/server/config.ts.
       HLS_CACHE_MAX_BYTES: ${HLS_CACHE_MAX_BYTES:-}
       HLS_CACHE_MAX_AGE_HOURS: ${HLS_CACHE_MAX_AGE_HOURS:-}
       THUMBNAIL_CACHE_MAX_BYTES: ${THUMBNAIL_CACHE_MAX_BYTES:-}
       THUMBNAIL_CACHE_MAX_AGE_HOURS: ${THUMBNAIL_CACHE_MAX_AGE_HOURS:-}
+      TRACK_MAP_CACHE_MAX_BYTES: ${TRACK_MAP_CACHE_MAX_BYTES:-}
+      TRACK_MAP_CACHE_MAX_AGE_HOURS: ${TRACK_MAP_CACHE_MAX_AGE_HOURS:-}
       MAX_CONCURRENT_TRANSCODES: ${MAX_CONCURRENT_TRANSCODES:-}
       TRANSCODE_MAX_WAITING: ${TRANSCODE_MAX_WAITING:-}
       TRANSCODE_THREADS: ${TRANSCODE_THREADS:-}
@@ -56,6 +59,7 @@ services:
       - ${MEDIA_PATH:?Set MEDIA_PATH in .env to the folder with your media}:/media:ro
       - hls-cache:/cache/hls
       - thumbnail-cache:/cache/thumbnails
+      - track-map-cache:/cache/track-maps
     restart: unless-stopped
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -109,3 +113,4 @@ volumes:
   zero-data:
   hls-cache:
   thumbnail-cache:
+  track-map-cache:

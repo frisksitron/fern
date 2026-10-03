@@ -41,6 +41,8 @@ Tuning:
 | `HLS_CACHE_MAX_AGE_HOURS`       | Transcoding cache age target                                                                    | 72      |
 | `THUMBNAIL_CACHE_MAX_BYTES`     | Progress-thumbnail cache size target                                                            | 1 GiB   |
 | `THUMBNAIL_CACHE_MAX_AGE_HOURS` | Progress-thumbnail cache idle-age target                                                        | 168     |
+| `TRACK_MAP_CACHE_MAX_BYTES`     | Music-analysis cache size target (for the visual effects)                                       | 256 MiB |
+| `TRACK_MAP_CACHE_MAX_AGE_HOURS` | Music-analysis cache idle-age target                                                            | 2160    |
 | `MAX_CONCURRENT_TRANSCODES`     | Concurrent on-demand segment transcodes                                                         | 2       |
 | `TRANSCODE_MAX_WAITING`         | Segment requests that may wait for a transcode slot; more are answered `503` with `Retry-After` | 8       |
 | `TRANSCODE_THREADS`             | CPU threads for each software transcode                                                         | 2       |

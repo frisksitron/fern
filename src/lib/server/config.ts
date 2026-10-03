@@ -22,6 +22,10 @@ export const AppConfig = Config.all({
   THUMBNAIL_CACHE_DIR: text('THUMBNAIL_CACHE_DIR', './.cache/thumbnails'),
   THUMBNAIL_CACHE_MAX_BYTES: positive('THUMBNAIL_CACHE_MAX_BYTES', 1024 ** 3),
   THUMBNAIL_CACHE_MAX_AGE_HOURS: positive('THUMBNAIL_CACHE_MAX_AGE_HOURS', 168),
+  // Songs analysed for the music visual effects.
+  TRACK_MAP_CACHE_DIR: text('TRACK_MAP_CACHE_DIR', './.cache/track-maps'),
+  TRACK_MAP_CACHE_MAX_BYTES: positive('TRACK_MAP_CACHE_MAX_BYTES', 256 * 1024 ** 2),
+  TRACK_MAP_CACHE_MAX_AGE_HOURS: positive('TRACK_MAP_CACHE_MAX_AGE_HOURS', 2160),
   MAX_CONCURRENT_TRANSCODES: positiveInt('MAX_CONCURRENT_TRANSCODES', 2),
   // Segment requests that may wait for a transcode slot; more are answered 503 with Retry-After.
   TRANSCODE_MAX_WAITING: positiveInt('TRANSCODE_MAX_WAITING', 8),

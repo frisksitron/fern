@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { page } from '$app/state';
   import {
     musicPlayer,
     nextTrack,
@@ -8,6 +9,8 @@
     setMusicPlaying,
     toggleShuffle,
   } from '$lib/client/music-player';
+  import { registerMusicClock } from '$lib/client/music-clock';
+  import { MUSIC_FX_PATH, closeMusicFx, openMusicFx } from '$lib/client/music-fx';
   import { readProfileId } from '$lib/client/profile';
   import { recordTrackPlay } from '$lib/client/zero/data';
   import { PlayCounter } from '$lib/music/plays';
@@ -23,6 +26,7 @@
   let handledToggleRequest = $musicPlayer.toggleRequest;
   const playCounter = new PlayCounter();
   let current = $derived($musicPlayer.queue[$musicPlayer.index]);
+  let onFxPage = $derived(page.url.pathname === MUSIC_FX_PATH);
   let sourceHref = $derived(
     $musicPlayer.sourceHref ??
       (current ? `/music/${current.mediaRootId}${current.parentId ? `/${current.parentId}` : ''}` : null),
@@ -39,6 +43,12 @@
   });
 
   onDestroy(() => setMusicPlaying(false));
+
+  // The visual effect follows this element's position (see `music-clock.ts`).
+  $effect(() => {
+    registerMusicClock(audio ?? null);
+    return () => registerMusicClock(null);
+  });
 
   // Lock screen, notification, headphone, and car controls.
   const mediaSession = () =>
@@ -225,6 +235,7 @@
 
 {#if current}
   <footer
+    data-fx-player
     class="fixed inset-x-0 bottom-0 z-40 isolate overflow-hidden border-t border-black bg-white pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-[0_-4px_0_rgba(0,0,0,.08)] sm:mx-auto sm:mb-[calc(1rem+env(safe-area-inset-bottom))] sm:w-[calc(100%-2rem)] sm:max-w-3xl sm:border sm:p-0"
   >
     <!-- Phones: the scrubber runs along the top edge, clear of the home indicator's swipe area. -->
@@ -297,6 +308,15 @@
         </div>
 
         <div class="flex items-center gap-1 md:h-14 md:justify-center md:border-l md:border-dotted md:border-black">
+          <button
+            class={[
+              'grid size-10 cursor-pointer place-items-center border-0 bg-transparent text-[10px] font-bold tracking-[.08em] transition hover:bg-[#e8e8e2]',
+              onFxPage ? 'text-[#c93600]' : 'text-[#6b6b67] hover:text-black',
+            ]}
+            onclick={() => (onFxPage ? closeMusicFx() : openMusicFx())}
+            aria-label="Visual effect"
+            aria-pressed={onFxPage}>FX</button
+          >
           <button
             class={[
               'hidden size-10 cursor-pointer place-items-center border-0 bg-transparent transition hover:bg-[#e8e8e2] disabled:cursor-default disabled:opacity-25 sm:grid',
