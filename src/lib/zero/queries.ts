@@ -3,7 +3,7 @@ import { Schema } from 'effect';
 import { MediaEntryId, MediaRootId, PlaylistId, ProfileId } from '$lib/shared/contracts/ids';
 import { MediaType } from '$lib/shared/contracts/media-roots';
 import { CONTINUE_WATCHING_LIMIT, RESUME_MIN_MS } from '$lib/shared/playback-state';
-import { MUSIC_SEARCH_LIMIT, QUERY_ID_LIMIT, likeContaining } from './limits';
+import { MUSIC_SEARCH_LIMIT, QUERY_ID_LIMIT, YOUTUBE_DOWNLOADS_LIMIT, likeContaining } from './limits';
 import { zql } from './schema';
 
 // Validators must stay synchronous: Zero rejects asynchronous Standard Schema validation.
@@ -69,6 +69,14 @@ export const queries = defineQueries({
     byId: defineQuery(validator(Schema.Struct({ id: MediaEntryId })), ({ args }) =>
       zql.mediaEntries.where('id', args.id).where('deletedAt', 'IS', null).one(),
     ),
+  },
+  chapters: {
+    forMedia: defineQuery(validator(Schema.Struct({ mediaEntryId: MediaEntryId })), ({ args }) =>
+      zql.mediaChapters.where('mediaEntryId', args.mediaEntryId).orderBy('position', 'asc'),
+    ),
+  },
+  youtubeDownloads: {
+    recent: defineQuery(() => zql.youtubeDownloads.orderBy('createdAt', 'desc').limit(YOUTUBE_DOWNLOADS_LIMIT)),
   },
   playlists: {
     forProfile: defineQuery(validator(Schema.Struct({ profileId: ProfileId })), ({ args }) =>

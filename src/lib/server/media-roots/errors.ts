@@ -21,4 +21,7 @@ export class MediaRootNotFound extends Data.TaggedError('MediaRootNotFound')<{ r
 /** A scan is active, so the root cannot be removed until it finishes. */
 export class MediaRootBusy extends Data.TaggedError('MediaRootBusy')<{ readonly id: string }> {}
 
-export type RemoveMediaRootError = MediaRootNotFound | MediaRootBusy | DatabaseUnavailable;
+/** The root is Fern's own (the YouTube library), not a folder a user added, so it cannot be removed. */
+export class MediaRootManaged extends Data.TaggedError('MediaRootManaged')<{ readonly id: string }> {}
+
+export type RemoveMediaRootError = MediaRootNotFound | MediaRootBusy | MediaRootManaged | DatabaseUnavailable;

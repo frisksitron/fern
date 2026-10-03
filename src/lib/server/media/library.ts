@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, isNull, or } from 'drizzle-orm';
 import { Context, Effect, Layer } from 'effect';
-import { mediaEntries, mediaRoots } from '$lib/server/db/schema';
+import { mediaChapters, mediaEntries, mediaRoots } from '$lib/server/db/schema';
 import { Database, orUnavailable, type DatabaseUnavailable } from '$lib/server/db/service';
 import { folderTrackIds } from '$lib/server/library/folder-tracks';
 import { FileSystem } from '$lib/server/platform/filesystem';
@@ -97,7 +97,17 @@ export class MediaLibrary extends Context.Service<MediaLibrary>()('fern/MediaLib
     /** The audio tracks in a music folder and its subfolders; see `folderTrackIds`. */
     const folderTracks = (rootId: string, folderId: string | null) => folderTrackIds(db, rootId, folderId);
 
-    return { activeMedia, artwork, fileInRoot, folderTracks } as const;
+    /** Where a file's chapters start, in seconds and in order: none for most songs, one per song for a mix. */
+    const chapterStarts = (id: MediaEntryId): Effect.Effect<number[], DatabaseUnavailable> =>
+      orUnavailable(
+        db
+          .select({ startMs: mediaChapters.startMs })
+          .from(mediaChapters)
+          .where(eq(mediaChapters.mediaEntryId, id))
+          .orderBy(asc(mediaChapters.position)),
+      ).pipe(Effect.map((rows) => rows.map((row) => row.startMs / 1000)));
+
+    return { activeMedia, artwork, fileInRoot, folderTracks, chapterStarts } as const;
   }),
 }) {
   /** Requires `Database` and `FileSystem`. */

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -39,6 +40,21 @@ async function write(relativePath: string, contents = 'media') {
 
 function ffprobeJson(file: string) {
   const name = path.basename(file);
+  // A mix as yt-dlp saves it: Ogg Opus keeps its tags on the audio stream. The file's text says
+  // which chapters it has.
+  if (name.endsWith('.opus'))
+    return {
+      format: { duration: '600.0', format_name: 'ogg' },
+      streams: [
+        { index: 0, codec_type: 'audio', codec_name: 'opus', tags: { title: 'Late Mix', ARTIST: 'Chrysalis' } },
+      ],
+      chapters: readFileSync(file, 'utf8').includes('recut')
+        ? [{ start_time: '0.000000', end_time: '600.000000', tags: { title: 'Whole Mix' } }]
+        : [
+            { start_time: '0.000000', end_time: '200.000000', tags: { title: 'Intro' } },
+            { start_time: '200.000000', end_time: '612.500000', tags: { title: 'Second Song' } },
+          ],
+    };
   if (/\.(mp3|flac)$/.test(name))
     return {
       format: { duration: '180.5', format_name: 'mp3', bit_rate: '320000', tags: { title: name, TRACK: '2/10' } },
@@ -301,5 +317,38 @@ describe('Scanner', () => {
       'Album/folder.png',
       'Album/folder.png',
     ]);
+  });
+
+  it('stores a mix’s chapters and its own cover, and replaces the chapters when the file changes', async () => {
+    await rm(library, { recursive: true, force: true });
+    await write('Chrysalis/cover.jpg', 'jpeg');
+    await write('Chrysalis/Late Mix [rBarjCP_KUs].opus', 'mix');
+    await write('Chrysalis/Late Mix [rBarjCP_KUs].jpg', 'jpeg');
+    const rootId = await addRoot(library, 'music');
+    await scanner().run(await queueScan(rootId));
+
+    const [song] = await query<{ title: string; artist: string; artwork: string }>(
+      `select e.title, e.artist, a.relative_path as artwork from media_entries e
+       join media_entries a on a.id = e.artwork_media_entry_id where e.is_audio`,
+    );
+    expect(song).toEqual({
+      title: 'Late Mix',
+      artist: 'Chrysalis',
+      artwork: 'Chrysalis/Late Mix [rBarjCP_KUs].jpg',
+    });
+    const chapters = () =>
+      query(
+        `select c.position, c.start_ms::int, c.end_ms::int, c.title from media_chapters c
+         join media_entries e on e.id = c.media_entry_id order by c.position`,
+      );
+    // The last chapter ends after the file does, so it is cut at the file's duration.
+    expect(await chapters()).toEqual([
+      { position: 0, start_ms: 0, end_ms: 200_000, title: 'Intro' },
+      { position: 1, start_ms: 200_000, end_ms: 600_000, title: 'Second Song' },
+    ]);
+
+    await write('Chrysalis/Late Mix [rBarjCP_KUs].opus', 'mix, recut');
+    await scanner().run(await queueScan(rootId));
+    expect(await chapters()).toEqual([{ position: 0, start_ms: 0, end_ms: 600_000, title: 'Whole Mix' }]);
   });
 });

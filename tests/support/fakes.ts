@@ -138,6 +138,7 @@ export function inMemoryMediaRootRepository(existing: readonly NewMediaRoot[] = 
         rows.splice(index, 1);
         return Effect.void;
       }),
+    ensureYouTubeRoot: () => Effect.die(new Error('The in-memory repository has no YouTube library')),
   });
   return { rows, layer };
 }

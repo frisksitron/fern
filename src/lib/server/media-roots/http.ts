@@ -56,5 +56,7 @@ export function removeMediaRootFailure(error: RemoveMediaRootError | RequestInva
         code: 'media_root.scan_active',
         message: 'A scan is running. Remove the folder when it finishes.',
       };
+    case 'MediaRootManaged':
+      return { status: 409, code: 'media_root.managed', message: 'Fern’s YouTube library cannot be removed.' };
   }
 }

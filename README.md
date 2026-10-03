@@ -6,7 +6,7 @@ Fern has no logins, so run it only on a network you trust.
 
 ## Self-hosting
 
-You need Docker with Compose. For media on a NAS, mount the share on the host first; Fern only ever reads your files.
+You need Docker with Compose. For media on a NAS, mount the share on the host first; Fern only ever reads your files (YouTube downloads go to a folder of their own).
 
 ```sh
 mkdir fern && cd fern
@@ -27,6 +27,7 @@ Compose reads `.env`. Only `MEDIA_PATH` is required.
 | Variable              | Purpose                                                                                                      | Default  |
 | --------------------- | ------------------------------------------------------------------------------------------------------------ | -------- |
 | `MEDIA_PATH`          | Folder with your media, mounted read-only at `/media`                                                        | required |
+| `DOWNLOADS_PATH`      | Folder for songs downloaded from YouTube, mounted at `/downloads`; must be writable by the container         | a volume |
 | `PORT`                | Port Fern is served on                                                                                       | 8080     |
 | `FERN_VERSION`        | Image tag of `ghcr.io/frisksitron/fern`: `latest` (follows `main`) or `sha-<commit>`                         | `latest` |
 | `POSTGRES_PASSWORD`   | Database password shared by Fern's containers. Postgres isn't reachable from outside the Compose network.    | `fern`   |
@@ -51,6 +52,10 @@ Tuning:
 | `LOG_LEVEL`                     | Lowest log level written: `Trace`, `Debug`, `Info`, `Warn`, or `Error`                          | `Info`  |
 | `LOG_FORMAT`                    | `json` (one object per line, with fields such as `requestId` and `scanId`) or `pretty`          | `json`  |
 | `SHUTDOWN_TIMEOUT`              | Seconds open requests get to finish when Fern stops                                             | 10      |
+
+### YouTube
+
+Paste a YouTube link under **Music → YouTube** and Fern saves the video's audio to its own YouTube library: Opus, as YouTube serves it, with the video's cover and chapters. A DJ set's chapters show as marks on the seek bar and in a chapter list, and previous and next skip between its songs, also from the lock screen. The image includes [yt-dlp](https://github.com/yt-dlp/yt-dlp); YouTube changes often, so if downloads start failing, update Fern.
 
 ### Health checks
 

@@ -42,6 +42,8 @@ describe('loadConfig', () => {
       SCAN_PROBE_CONCURRENCY: 4,
       FFMPEG_PATH: 'ffmpeg',
       FFPROBE_PATH: 'ffprobe',
+      YTDLP_PATH: 'yt-dlp',
+      DOWNLOADS_DIR: './downloads',
       LOG_LEVEL: 'Info',
       LOG_FORMAT: 'pretty',
       BROWSE_ROOTS: [],

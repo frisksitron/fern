@@ -1,12 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { Context, Effect, Layer } from 'effect';
 import { mediaRoots, scanRuns } from '$lib/server/db/schema';
 import { Database, orUnavailable, uniqueViolation, type DatabaseUnavailable } from '$lib/server/db/service';
 import { pathsOverlap } from '$lib/server/media/paths';
 import { activeScanStates } from '$lib/server/scans/state';
-import type { MediaRootId } from '$lib/shared/contracts/ids';
+import { MediaRootId } from '$lib/shared/contracts/ids';
 import type { MediaRootSummary } from '$lib/shared/contracts/media-roots';
-import { MediaRootBusy, MediaRootNotFound, MediaRootOverlap } from './errors';
+import { MediaRootBusy, MediaRootManaged, MediaRootNotFound, MediaRootOverlap } from './errors';
 
 export type NewMediaRoot = Omit<MediaRootSummary, 'displayOrder'>;
 
@@ -22,9 +23,17 @@ export class MediaRootRepository extends Context.Service<
     ) => Effect.Effect<MediaRootSummary, MediaRootOverlap | DatabaseUnavailable>;
     /**
      * Deletes a root and, through cascades, its entries, tracks, subtitles, and progress. Refused
-     * while a scan is active, so a scan never writes into a root that is being removed.
+     * while a scan is active, so a scan never writes into a root that is being removed, and for the
+     * YouTube library, which Fern owns.
      */
-    readonly remove: (id: MediaRootId) => Effect.Effect<void, MediaRootNotFound | MediaRootBusy | DatabaseUnavailable>;
+    readonly remove: (
+      id: MediaRootId,
+    ) => Effect.Effect<void, MediaRootNotFound | MediaRootBusy | MediaRootManaged | DatabaseUnavailable>;
+    /**
+     * The YouTube library's root at `path`: created on first use, after every existing root, and
+     * moved when `DOWNLOADS_DIR` changes. Like any root, it may not overlap another.
+     */
+    readonly ensureYouTubeRoot: (path: string) => Effect.Effect<MediaRootId, MediaRootOverlap | DatabaseUnavailable>;
   }
 >()('fern/MediaRootRepository') {
   /** The PostgreSQL implementation. Requires `Database`. */
@@ -78,19 +87,68 @@ export class MediaRootRepository extends Context.Service<
                   .where(inArray(scanRuns.state, [...activeScanStates]))
                   .limit(1);
                 if (active) return 'busy' as const;
-                const deleted = yield* tx
-                  .delete(mediaRoots)
+                const [root] = yield* tx
+                  .select({ source: mediaRoots.source })
+                  .from(mediaRoots)
                   .where(eq(mediaRoots.id, id))
-                  .returning({ id: mediaRoots.id });
-                return deleted.length ? ('deleted' as const) : ('missing' as const);
+                  .limit(1);
+                if (!root) return 'missing' as const;
+                if (root.source !== 'folder') return 'managed' as const;
+                yield* tx.delete(mediaRoots).where(eq(mediaRoots.id, id));
+                return 'deleted' as const;
               }),
             ),
           );
           if (outcome === 'busy') return yield* new MediaRootBusy({ id });
           if (outcome === 'missing') return yield* new MediaRootNotFound({ id });
+          if (outcome === 'managed') return yield* new MediaRootManaged({ id });
         });
 
-      return { insertIfNoOverlap, remove };
+      const ensureYouTubeRoot = (path: string) =>
+        Effect.gen(function* () {
+          const result = yield* orUnavailable(
+            db.transaction((tx) =>
+              Effect.gen(function* () {
+                // The same lock as creation, so the overlap check cannot race a folder being added.
+                yield* tx.execute(sql`lock table ${mediaRoots} in share row exclusive mode`);
+                const existing = yield* tx
+                  .select({
+                    id: mediaRoots.id,
+                    path: mediaRoots.path,
+                    displayOrder: mediaRoots.displayOrder,
+                    source: mediaRoots.source,
+                  })
+                  .from(mediaRoots);
+                const current = existing.find((row) => row.source === 'youtube');
+                if (current?.path === path) return { outcome: 'ready' as const, id: current.id };
+                const conflict = existing.find((row) => row.id !== current?.id && pathsOverlap(row.path, path));
+                if (conflict) return { outcome: 'overlap' as const, conflictingRootId: conflict.id };
+                if (current) {
+                  yield* tx
+                    .update(mediaRoots)
+                    .set({ path, updatedAt: sql`now()` })
+                    .where(eq(mediaRoots.id, current.id));
+                  return { outcome: 'ready' as const, id: current.id };
+                }
+                const id = randomUUID();
+                yield* tx.insert(mediaRoots).values({
+                  id,
+                  path,
+                  displayName: 'YouTube',
+                  mediaType: 'music',
+                  source: 'youtube',
+                  displayOrder: Math.max(-1, ...existing.map((row) => row.displayOrder)) + 1,
+                });
+                return { outcome: 'ready' as const, id };
+              }),
+            ),
+          );
+          if (result.outcome === 'overlap')
+            return yield* new MediaRootOverlap({ path, conflictingRootId: result.conflictingRootId });
+          return MediaRootId.make(result.id);
+        });
+
+      return { insertIfNoOverlap, remove, ensureYouTubeRoot };
     }),
   );
 }

@@ -29,6 +29,7 @@ describe('migrations from an empty database', () => {
     );
     expect(tables.rows.map((row) => row.table_name)).toEqual([
       'external_subtitles',
+      'media_chapters',
       'media_entries',
       'media_roots',
       'media_tracks',
@@ -40,6 +41,7 @@ describe('migrations from an empty database', () => {
       'scan_jobs',
       'scan_runs',
       'track_plays',
+      'youtube_downloads',
     ]);
   });
 

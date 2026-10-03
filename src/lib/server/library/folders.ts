@@ -27,6 +27,7 @@ export function loadMediaRoots(mediaType: 'video' | 'music' | null, stats: Query
           mediaType: mediaRoots.mediaType,
           displayOrder: mediaRoots.displayOrder,
           lastScannedAt: mediaRoots.lastScannedAt,
+          source: mediaRoots.source,
         })
         .from(mediaRoots)
         .where(mediaType ? eq(mediaRoots.mediaType, mediaType) : undefined)

@@ -11,6 +11,7 @@ import { Scans } from './scans/service';
 import { Thumbnails } from './thumbnails/service';
 import { TrackMaps } from './track-maps/service';
 import { Transcoding } from './transcoding/service';
+import { YouTubeDownloads } from './youtube/service';
 import { ZeroServer } from './zero/service';
 
 /** Services available to route handlers and page loads. */
@@ -25,6 +26,7 @@ export type AppServices =
   | Thumbnails
   | TrackMaps
   | Health
+  | YouTubeDownloads
   | ZeroServer;
 
 // Each service's `layer` wires its own dependencies. Layers are shared by reference, so a
@@ -47,6 +49,7 @@ const AppLayer: Layer.Layer<AppServices> = Layer.mergeAll(
   Thumbnails.layer,
   TrackMaps.layer,
   Health.layer,
+  YouTubeDownloads.layer,
   ZeroServer.layer,
 ).pipe(Layer.provideMerge(Infrastructure), Layer.provide(Logging));
 

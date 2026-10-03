@@ -114,6 +114,54 @@ export function loudnessMeter(rate = SAMPLE_RATE) {
   };
 }
 
+/** A chapter this short (in seconds) is measured with the one before it: too little to judge as a song. */
+const SHORTEST_PART = 30;
+
+/**
+ * A track's map from its loudness (see `loudnessMeter`). A track with chapters, such as a DJ mix
+ * with one per song, is mapped a chapter at a time, each as a song of its own: each is measured
+ * against itself, so a quiet song in a loud mix still uses the whole range and has its own peaks.
+ * `chapterStarts` are in seconds, in order.
+ */
+export function mapTrack(loudness: Loudness, chapterStarts: readonly number[] = []): TrackMap {
+  const length = loudness.total.length;
+  const cuts = [0];
+  for (const start of chapterStarts) {
+    const at = steps(start);
+    if (at - cuts.at(-1)! >= steps(SHORTEST_PART) && length - at >= steps(SHORTEST_PART)) cuts.push(at);
+  }
+  if (cuts.length === 1) return mapSong(loudness);
+  cuts.push(length);
+  const parts = cuts.slice(0, -1).map((from, index) => {
+    const to = cuts[index + 1];
+    const part = (values: Float32Array) => values.subarray(from, to);
+    const { total, bass, mid, treble, air } = loudness;
+    const map = mapSong({ total: part(total), bass: part(bass), mid: part(mid), treble: part(treble), air: part(air) });
+    return { map, offset: from * STEP };
+  });
+  const join = (series: (map: TrackMap) => Float32Array) => {
+    const joined = new Float32Array(length);
+    parts.forEach(({ map }, index) => joined.set(series(map), cuts[index]));
+    return joined;
+  };
+  return {
+    peaks: parts.flatMap(({ map, offset }) =>
+      map.peaks.map((peak) => ({ ...peak, start: peak.start + offset, end: peak.end + offset })),
+    ),
+    levels: {
+      bass: join((map) => map.levels.bass),
+      mid: join((map) => map.levels.mid),
+      treble: join((map) => map.levels.treble),
+    },
+    hits: {
+      bass: join((map) => map.hits.bass),
+      mid: join((map) => map.hits.mid),
+      treble: join((map) => map.hits.treble),
+    },
+    calm: join((map) => map.calm),
+  };
+}
+
 /** A song's map from its loudness (see `loudnessMeter`). */
 export function mapSong(loudness: Loudness): TrackMap {
   const audible = loudness.total.map((value) => (value > SILENCE ? 1 : 0));

@@ -123,4 +123,46 @@ describe('MediaRootRepository on PostgreSQL', () => {
       await database.pool.query('truncate scan_runs cascade');
     }
   });
+
+  it('creates the YouTube library once, after the other roots, and moves it with its folder', async () => {
+    await insert(root('/media'));
+    const first = await repository((roots) => roots.ensureYouTubeRoot('/downloads'));
+    const again = await repository((roots) => roots.ensureYouTubeRoot('/downloads'));
+    expect(first._tag).toBe('Success');
+    expect(again).toEqual(first);
+    expect(
+      (
+        await database.pool.query(
+          'select path, display_name, media_type, source, display_order from media_roots where source = $1',
+          ['youtube'],
+        )
+      ).rows,
+    ).toEqual([
+      { path: '/downloads', display_name: 'YouTube', media_type: 'music', source: 'youtube', display_order: 1 },
+    ]);
+
+    const moved = await repository((roots) => roots.ensureYouTubeRoot('/srv/downloads'));
+    expect(moved).toEqual(first);
+    expect((await database.pool.query('select path from media_roots where source = $1', ['youtube'])).rows).toEqual([
+      { path: '/srv/downloads' },
+    ]);
+  });
+
+  it('keeps the YouTube library out of media folders, and refuses to remove it', async () => {
+    await insert(root('/media'));
+    expect(await repository((roots) => roots.ensureYouTubeRoot('/media/downloads'))).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'MediaRootOverlap' },
+    });
+    const created = await repository((roots) => roots.ensureYouTubeRoot('/downloads'));
+    if (created._tag !== 'Success') throw new Error('The YouTube library was not created');
+    expect(await insert(root('/downloads/mixes'))).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'MediaRootOverlap' },
+    });
+    expect(await repository((roots) => roots.remove(created.success))).toMatchObject({
+      _tag: 'Failure',
+      failure: { _tag: 'MediaRootManaged' },
+    });
+  });
 });

@@ -4,7 +4,7 @@ import { AUDIO_EXTENSIONS, VIDEO_EXTENSIONS } from '$lib/shared/constants';
 import type { DiscoveredItem } from './traversal';
 
 /** Bump to re-probe every media file on the next scan (for example after changing what is extracted). */
-export const PROBE_VERSION = 2;
+export const PROBE_VERSION = 3;
 
 type ProbeStatus = 'not_required' | 'pending' | 'ok' | 'failed';
 
@@ -113,7 +113,9 @@ export function artworkRank(name: string) {
 
 /**
  * The artwork each music folder and song should show: the best-ranked image in its folder or the
- * nearest ancestor folder with one. Returns only entries whose stored artwork differs.
+ * nearest ancestor folder with one. A song with an image of its own name beside it (`Mix.jpg` for
+ * `Mix.opus`, as YouTube downloads are saved) shows that instead. Returns only entries whose stored
+ * artwork differs.
  */
 export function planArtwork(
   entries: readonly PlannedEntry[],
@@ -123,18 +125,24 @@ export function planArtwork(
     entries.filter((entry) => entry.kind === 'directory').map((entry) => [entry.id, entry.parentId]),
   );
   const artworkByFolder = new Map<string, string>();
+  const ownArtwork = new Map<string, string>();
+  const ownArtworkKey = (entry: PlannedEntry) => `${entry.parentId}/${path.parse(entry.name).name.toLowerCase()}`;
   const images = entries
     .filter((entry) => entry.kind === 'file' && artworkExtensions.has(entry.extension ?? ''))
     .sort((left, right) => artworkRank(left.name) - artworkRank(right.name) || left.name.localeCompare(right.name));
-  for (const image of images)
+  for (const image of images) {
     if (image.parentId && !artworkByFolder.has(image.parentId)) artworkByFolder.set(image.parentId, image.id);
+    if (!ownArtwork.has(ownArtworkKey(image))) ownArtwork.set(ownArtworkKey(image), image.id);
+  }
 
   const changes: Array<{ id: string; artworkId: string | null }> = [];
   for (const entry of entries) {
     if (entry.kind !== 'directory' && !entry.isAudio) continue;
     let folderId: string | null = entry.kind === 'directory' ? entry.id : entry.parentId;
     while (folderId && !artworkByFolder.has(folderId)) folderId = parentOfDirectory.get(folderId) ?? null;
-    const artworkId = folderId ? artworkByFolder.get(folderId)! : null;
+    const artworkId =
+      (entry.isAudio ? ownArtwork.get(ownArtworkKey(entry)) : undefined) ??
+      (folderId ? artworkByFolder.get(folderId)! : null);
     if ((storedArtwork.get(entry.id) ?? null) !== artworkId) changes.push({ id: entry.id, artworkId });
   }
   return changes;

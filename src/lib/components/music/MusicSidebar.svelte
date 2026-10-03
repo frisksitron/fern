@@ -74,6 +74,16 @@
         {@render mark(route.searching)}
         <span>Search</span>
       </a>
+      <a
+        class={[
+          'flex min-h-10 items-center gap-2 overflow-hidden font-semibold no-underline',
+          route.youtube ? 'text-fern-accent' : 'text-[#414141] hover:text-fern-accent hover:underline',
+        ]}
+        href={resolve('/music/youtube')}
+      >
+        {@render mark(route.youtube)}
+        <span>YouTube</span>
+      </a>
       <div class="mt-4 mb-1 border-b border-dotted border-black pb-3">
         <span class="text-base leading-6 font-bold uppercase">Playlists /</span>
       </div>

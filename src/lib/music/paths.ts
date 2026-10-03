@@ -1,7 +1,11 @@
+/** The page for downloading songs from YouTube. */
+export const MUSIC_YOUTUBE_PATH = '/music/youtube';
+
 export function isMusicBrowsePath(pathname: string) {
   if (pathname === '/music') return true;
   if (!pathname.startsWith('/music/')) return false;
   if (pathname === '/music/search' || pathname.startsWith('/music/search/')) return false;
+  if (pathname === MUSIC_YOUTUBE_PATH) return false;
   if (pathname === '/music/playlist' || pathname.startsWith('/music/playlist/')) return false;
   return true;
 }
@@ -21,6 +25,7 @@ export function musicRoute(pathname: string, savedBrowseHref: string) {
   return {
     browsing,
     searching: pathname === '/music/search',
+    youtube: pathname === MUSIC_YOUTUBE_PATH,
     browseHref: browsing ? pathname : savedBrowseHref,
     activePlaylistId: playlistIdFromPath(pathname),
   };

@@ -1,7 +1,7 @@
 import { Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { compileScore, ROWS } from '../../src/lib/components/music/fx/score';
-import { loudnessMeter, mapSong, SAMPLE_RATE } from '../../src/lib/server/track-maps/analysis';
+import { loudnessMeter, mapSong, mapTrack, SAMPLE_RATE } from '../../src/lib/server/track-maps/analysis';
 import {
   decodeTrackMap,
   encodeTrackMap,
@@ -77,6 +77,47 @@ describe('song analysis', () => {
     expect(silent.peaks).toEqual([]);
     expect([...silent.levels.bass, ...silent.hits.bass, ...silent.calm].every(Number.isFinite)).toBe(true);
     expect(mapOf(new Float32Array(100)).calm).toHaveLength(0);
+  });
+});
+
+describe('mix analysis', () => {
+  /** A DJ mix of two songs: the song, then the same song 12 dB quieter. */
+  const loudness = (() => {
+    const loud = song();
+    const samples = new Float32Array(loud.length * 2);
+    samples.set(loud);
+    samples.set(
+      song().map((sample) => sample / 4),
+      loud.length,
+    );
+    const meter = loudnessMeter();
+    meter.write(new Uint8Array(samples.buffer));
+    return meter.finish();
+  })();
+
+  it('maps each chapter as a song of its own, so a quieter song is mapped like a loud one', () => {
+    const map = mapTrack(loudness, [0, 90]);
+    expect(map.calm).toHaveLength(180 / TRACK_MAP_STEP);
+    expect(map.peaks.map((peak) => [Math.round(peak.start), Math.round(peak.end)])).toEqual([
+      [30, 60],
+      [120, 150],
+    ]);
+    expect(count(map.hits.bass, 120, 150)).toBe(60);
+    expect(mean(map.levels.bass, 125, 145)).toBeCloseTo(mean(map.levels.bass, 35, 55), 1);
+    expect(mean(map.calm, 125, 145)).toBeLessThan(0.1);
+  });
+
+  it('maps a track without chapters as one song, against its loudest parts', () => {
+    const map = mapTrack(loudness);
+    expect(map).toEqual(mapSong(loudness));
+    // The quieter song is measured against the loud one, so its chorus never gets near the top.
+    expect(mean(map.levels.bass, 125, 145)).toBeLessThan(mean(map.levels.bass, 35, 55) - 0.2);
+  });
+
+  it('measures a chapter too short to judge with the one before it', () => {
+    const halves = mapTrack(loudness, [0, 90]);
+    expect(mapTrack(loudness, [0, 10, 90])).toEqual(halves);
+    expect(mapTrack(loudness, [0, 90, 175])).toEqual(halves);
   });
 });
 

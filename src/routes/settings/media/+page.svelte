@@ -122,6 +122,12 @@
               <span class="border border-black bg-white px-1.5 py-0.5 text-[10px] font-semibold text-black uppercase"
                 >{root.mediaType}</span
               >
+              {#if root.source === 'youtube'}
+                <span
+                  class="border border-black bg-[#e8e8e2] px-1.5 py-0.5 text-[10px] font-semibold text-black uppercase"
+                  title="Fern saves YouTube downloads here. It cannot be removed.">Downloads</span
+                >
+              {/if}
             </div>
             <p class="truncate text-sm text-[#6b6b67]">{root.path}</p>
             <p class="mt-1 flex h-4 min-w-0 items-center gap-2 text-xs text-[#6b6b67]" aria-live="polite">
@@ -133,7 +139,9 @@
         </div>
         <div class="flex shrink-0 gap-2 sm:justify-end">
           <Button variant="secondary" size="small" disabled={scan.running} onclick={() => start(root.id)}>Scan</Button>
-          <Button variant="danger" size="small" disabled={scan.running} onclick={() => remove(root)}>Remove</Button>
+          {#if root.source !== 'youtube'}
+            <Button variant="danger" size="small" disabled={scan.running} onclick={() => remove(root)}>Remove</Button>
+          {/if}
         </div>
       </div>
     {:else}

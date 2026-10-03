@@ -17,6 +17,8 @@ const sampleArgs: Record<string, unknown> = {
   'mediaEntries.children': { rootId, parentId: null },
   'mediaEntries.musicChildren': { rootId, parentId: entryId },
   'mediaEntries.byId': { id: entryId },
+  'chapters.forMedia': { mediaEntryId: entryId },
+  'youtubeDownloads.recent': undefined,
   'playlists.forProfile': { profileId },
   'playlistItems.forPlaylist': { playlistId },
   'progress.forMedia': { profileId, mediaEntryId: entryId },

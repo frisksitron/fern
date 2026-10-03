@@ -29,6 +29,10 @@
       class={route.searching ? 'text-fern-accent no-underline' : 'text-[#065ec9] no-underline hover:underline'}
       href={resolve('/music/search')}>Search</a
     >
+    <a
+      class={route.youtube ? 'text-fern-accent no-underline' : 'text-[#065ec9] no-underline hover:underline'}
+      href={resolve('/music/youtube')}>YouTube</a
+    >
   </nav>
 </div>
 <!-- The strip fades at the right edge, so a clipped name reads as "scroll for more". -->

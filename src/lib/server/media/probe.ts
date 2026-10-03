@@ -18,6 +18,15 @@ export type NormalizedTrack = {
   height: number | null;
 };
 
+/** A named part of a file, such as one song of a DJ mix. */
+export type NormalizedChapter = {
+  /** The chapter's place in the file, from 0. */
+  position: number;
+  startMs: number;
+  endMs: number;
+  title: string | null;
+};
+
 export type ProbeResult = {
   durationMs: number | null;
   container: string | null;
@@ -36,6 +45,7 @@ export type ProbeResult = {
   albumArtist: string | null;
   trackNumber: number | null;
   tracks: NormalizedTrack[];
+  chapters: NormalizedChapter[];
 };
 
 /** ffprobe could not read the file, or its output was not the JSON Fern expects. */
@@ -65,6 +75,12 @@ const FfprobeStream = Schema.Struct({
   height: Schema.optionalKey(Schema.Number),
 });
 
+const FfprobeChapter = Schema.Struct({
+  start_time: Scalar,
+  end_time: Scalar,
+  tags: Schema.optionalKey(Tags),
+});
+
 const FfprobeOutput = Schema.Struct({
   format: Schema.optionalKey(
     Schema.Struct({
@@ -75,6 +91,7 @@ const FfprobeOutput = Schema.Struct({
     }),
   ),
   streams: Schema.optionalKey(Schema.Array(FfprobeStream)),
+  chapters: Schema.optionalKey(Schema.Array(FfprobeChapter)),
 });
 type FfprobeOutput = typeof FfprobeOutput.Type;
 
@@ -86,6 +103,28 @@ function positiveInteger(value: unknown) {
 }
 
 const trackKinds = new Set(['video', 'audio', 'subtitle']);
+
+const lowerCaseKeys = (tags: Readonly<Record<string, string>> | undefined) =>
+  Object.fromEntries(Object.entries(tags ?? {}).map(([key, value]) => [key.toLowerCase(), value]));
+
+/**
+ * Chapters in playback order, without empty ones. The last chapter often ends a little after the
+ * file does; it is cut at the file's duration.
+ */
+function normalizeChapters(chapters: FfprobeOutput['chapters'], durationMs: number | null): NormalizedChapter[] {
+  return (chapters ?? [])
+    .map((chapter) => {
+      const endMs = Math.round(Number(chapter.end_time) * 1000);
+      return {
+        startMs: Math.max(0, Math.round(Number(chapter.start_time) * 1000)),
+        endMs: durationMs === null ? endMs : Math.min(endMs, durationMs),
+        title: lowerCaseKeys(chapter.tags).title?.trim() || null,
+      };
+    })
+    .filter((chapter) => Number.isFinite(chapter.startMs) && chapter.endMs > chapter.startMs)
+    .sort((left, right) => left.startMs - right.startMs)
+    .map((chapter, position) => ({ position, ...chapter }));
+}
 
 /** Turns decoded ffprobe output into the metadata Fern stores. */
 function normalizeProbe(output: FfprobeOutput): ProbeResult {
@@ -110,13 +149,22 @@ function normalizeProbe(output: FfprobeOutput): ProbeResult {
   const video = tracks.find((track) => track.kind === 'video');
   const audioTracks = tracks.filter((track) => track.kind === 'audio');
   const audio = audioTracks.find((track) => track.isDefault) ?? audioTracks[0];
-  const tags = Object.fromEntries(
-    Object.entries(output.format?.tags ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
+  // Ogg files (Opus, Vorbis) keep their tags on the audio stream rather than on the file. Only
+  // audio files fall back to them: a video's audio streams are titled things like "Surround 5.1".
+  const audioOnly = !(output.streams ?? []).some(
+    (stream) => stream.codec_type === 'video' && stream.disposition?.attached_pic !== 1,
   );
+  const audioStream = audio && output.streams?.find((stream) => stream.index === audio.streamIndex);
+  const tags = {
+    ...(audioOnly ? lowerCaseKeys(audioStream?.tags) : {}),
+    ...lowerCaseKeys(output.format?.tags),
+  };
   const trackNumber = Number.parseInt(tags.track?.split('/')[0] ?? '', 10);
   const duration = Number(output.format?.duration);
+  const durationMs =
+    output.format?.duration !== undefined && Number.isFinite(duration) ? Math.round(duration * 1000) : null;
   return {
-    durationMs: output.format?.duration !== undefined && Number.isFinite(duration) ? Math.round(duration * 1000) : null,
+    durationMs,
     container: output.format?.format_name?.split(',')[0] ?? null,
     videoCodec: video?.codec ?? null,
     audioCodecSummary: [...new Set(audioTracks.map((track) => track.codec))].join(',') || null,
@@ -133,6 +181,7 @@ function normalizeProbe(output: FfprobeOutput): ProbeResult {
     albumArtist: tags.album_artist ?? tags.albumartist ?? null,
     trackNumber: Number.isFinite(trackNumber) ? trackNumber : null,
     tracks,
+    chapters: normalizeChapters(output.chapters, durationMs),
   };
 }
 
@@ -142,7 +191,7 @@ export function probeMedia(file: string, timeout: Duration.Input = '30 seconds')
     const runner = yield* MediaProcessRunner;
     const { stdout } = yield* runner.run({
       program: 'ffprobe',
-      args: ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', file],
+      args: ['-v', 'error', '-show_format', '-show_streams', '-show_chapters', '-of', 'json', file],
       timeout,
       maxStdoutBytes: 10_000_000,
     });

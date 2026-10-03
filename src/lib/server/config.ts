@@ -37,6 +37,10 @@ export const AppConfig = Config.all({
   SCAN_PROBE_CONCURRENCY: positiveInt('SCAN_PROBE_CONCURRENCY', 4),
   FFMPEG_PATH: text('FFMPEG_PATH', 'ffmpeg'),
   FFPROBE_PATH: text('FFPROBE_PATH', 'ffprobe'),
+  YTDLP_PATH: text('YTDLP_PATH', 'yt-dlp'),
+  // Where songs from YouTube are saved. Fern keeps it as a music library of its own, separate from
+  // the media folders users add, so nothing is ever written into those.
+  DOWNLOADS_DIR: text('DOWNLOADS_DIR', './downloads'),
   // Log entries below this level are dropped.
   LOG_LEVEL: Config.Literals(['Trace', 'Debug', 'Info', 'Warn', 'Error'], 'LOG_LEVEL').pipe(Config.withDefault('Info')),
   // `json` writes one JSON object per entry with its fields (scanId, requestId, …); `pretty` is for terminals.

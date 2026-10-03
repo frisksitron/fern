@@ -124,13 +124,22 @@ describe('TrackMaps', () => {
     expect((await readdir(path.join(workspace, 'track-maps'))).filter((name) => name.includes('.tmp.'))).toEqual([]);
   });
 
-  it('reads the whole track, however long', async () => {
+  it('reads the whole track, however long, and reads it again when its chapters change', async () => {
     const runner = fakeFfmpeg();
     const read = trackMaps(runner);
-    await read((service) => service.trackMapOf(mediaId));
+    const first = await read((service) => service.trackMapOf(mediaId));
     // No cut-off, and minutes more to read for every ten of the track's length (here 30 s).
     expect(runner.runs[0]).not.toContain('-t');
     expect(runner.timeouts).toEqual([3 * 60_000 + 3_000]);
+
+    await database.pool.query(
+      `insert into media_chapters (media_entry_id, position, start_ms, end_ms, title)
+       values ($1, 0, 0, 15000, 'One'), ($1, 1, 15000, 30000, 'Two')`,
+      [mediaId],
+    );
+    const chaptered = await read((service) => service.trackMapOf(mediaId));
+    expect(chaptered.key).not.toBe(first.key);
+    expect(runner.runs).toHaveLength(2);
   });
 
   it('reports audio FFmpeg cannot decode as TrackMapFailed', async () => {

@@ -37,6 +37,7 @@ services:
       HLS_CACHE_DIR: /cache/hls
       THUMBNAIL_CACHE_DIR: /cache/thumbnails
       TRACK_MAP_CACHE_DIR: /cache/track-maps
+      DOWNLOADS_DIR: /downloads
       BROWSE_ROOTS: ${BROWSE_ROOTS:-/media}
       # Empty values fall back to the server defaults in src/lib/server/config.ts.
       HLS_CACHE_MAX_BYTES: ${HLS_CACHE_MAX_BYTES:-}
@@ -60,6 +61,8 @@ services:
       - hls-cache:/cache/hls
       - thumbnail-cache:/cache/thumbnails
       - track-map-cache:/cache/track-maps
+      # YouTube downloads: a folder of their own, so /media stays read-only.
+      - ${DOWNLOADS_PATH:-downloads}:/downloads
     restart: unless-stopped
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -114,3 +117,4 @@ volumes:
   hls-cache:
   thumbnail-cache:
   track-map-cache:
+  downloads:

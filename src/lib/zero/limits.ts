@@ -4,6 +4,9 @@ export const QUERY_ID_LIMIT = 500;
 /** Music search shows at most this many tracks. */
 export const MUSIC_SEARCH_LIMIT = 100;
 
+/** The YouTube page lists this many of the latest downloads. */
+export const YOUTUBE_DOWNLOADS_LIMIT = 50;
+
 /**
  * An ILIKE pattern matching `text` anywhere. LIKE wildcards and the escape character are dropped
  * from the search text rather than escaped, so they match nothing special on any Zero backend.

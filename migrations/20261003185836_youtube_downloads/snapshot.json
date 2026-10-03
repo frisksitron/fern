@@ -1,0 +1,3242 @@
+{
+  "version": "8",
+  "dialect": "postgres",
+  "id": "fd80bd83-a53c-4b7e-a9da-a7a062d1513f",
+  "prevIds": [
+    "a9fc2a0b-c204-442f-b4da-81dd8ff4fbf1"
+  ],
+  "ddl": [
+    {
+      "isRlsEnabled": false,
+      "name": "external_subtitles",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "media_chapters",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "media_entries",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "media_roots",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "media_tracks",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "playback_progress",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "playlist_items",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "playlists",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "profiles",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "scan_errors",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "scan_jobs",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "scan_runs",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "track_plays",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "youtube_downloads",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "relative_path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "format",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "language",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "mtime_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "deleted_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "position",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "start_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "end_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "title",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_root_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "parent_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "relative_path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "kind",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "sort_order",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "extension",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "size_bytes",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "mtime_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "is_video",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "is_audio",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "duration_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "container",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "title",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "artist",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "album",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "album_artist",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "track_number",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "artwork_media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "video_codec",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "audio_codec_summary",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "audio_bitrate",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "audio_sample_rate",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "audio_bit_depth",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "audio_channels",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "audio_channel_layout",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "width",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "height",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'not_required'",
+      "generated": null,
+      "identity": null,
+      "name": "probe_status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "1",
+      "generated": null,
+      "identity": null,
+      "name": "probe_version",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "probe_error_code",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "deleted_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "display_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_type",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "display_order",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "last_scanned_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'folder'",
+      "generated": null,
+      "identity": null,
+      "name": "source",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "stream_index",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "kind",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "codec",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "language",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "title",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "is_default",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "is_forced",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "channels",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "channel_layout",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "bitrate",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "sample_rate",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "bit_depth",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "width",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "height",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "profile_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "position_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "duration_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "watched",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "last_played_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "playlist_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "position",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "profile_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "profiles"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "avatar_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "profiles"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "profiles"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "profiles"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "scan_run_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_root_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "relative_path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "stage",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "error_code",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "message",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "scan_run_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'pending'",
+      "generated": null,
+      "identity": null,
+      "name": "state",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "max_attempts",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "available_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "locked_by",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "locked_until",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "last_error",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "finished_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "state",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "root_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "requested_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "current_root_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "current_path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "directories_seen",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "files_seen",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "videos_seen",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "audio_seen",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "files_probed",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "errors_count",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "error_summary",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "attempts",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "profile_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "played_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "video_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "url",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'queued'",
+      "generated": null,
+      "identity": null,
+      "name": "state",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "title",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "channel",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "duration_ms",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "downloaded_bytes",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "total_bytes",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "relative_path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "media_entry_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "error_message",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "completed_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "media_root_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "parent_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "deleted_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "entry_children",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "is_video",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "deleted_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "entry_video",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "is_audio",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "deleted_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "entry_audio",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "parent_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "entry_parent",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "artwork_media_entry_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "entry_artwork",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "source",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": "\"source\" = 'youtube'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "media_root_single_youtube",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "profile_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "watched",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "last_played_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "progress_continue",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "media_entry_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "progress_media",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "playlist_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "position",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "playlist_item_order",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "media_entry_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "playlist_item_media",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "profile_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "created_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "playlist_profile",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "scan_run_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "scan_error_run",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "media_root_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "scan_error_root",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "available_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"state\" = 'pending'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "scan_job_available",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "finished_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"state\" in ('completed','failed')",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "scan_job_finished",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "(true)",
+          "isExpression": true,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": "\"state\" in ('queued','running','retrying')",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "scan_single_active",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "profile_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "played_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "track_play_recent",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "profile_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "media_entry_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "track_play_profile_media",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "media_entry_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "track_play_media",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "created_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "youtube_download_recent",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "media_entry_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "youtube_download_media",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "video_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": "\"state\" in ('queued','downloading','indexing')",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "youtube_download_single_active",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "external_subtitles_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "media_chapters_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_root_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_roots",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "media_entries_media_root_id_media_roots_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "parent_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "media_entries_parent_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "artwork_media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "name": "media_entries_artwork_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "media_tracks_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "profile_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "profiles",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "playback_progress_profile_id_profiles_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "playback_progress_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "playlist_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "playlists",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "playlist_items_playlist_id_playlists_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "playlist_items_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "profile_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "profiles",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "playlists_profile_id_profiles_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "scan_run_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "scan_runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "scan_errors_scan_run_id_scan_runs_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_root_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_roots",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "name": "scan_errors_media_root_id_media_roots_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "scan_run_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "scan_runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "scan_jobs_scan_run_id_scan_runs_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "profile_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "profiles",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "track_plays_profile_id_profiles_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "track_plays_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "track_plays"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "media_entry_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "media_entries",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "SET NULL",
+      "name": "youtube_downloads_media_entry_id_media_entries_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "columns": [
+        "media_entry_id",
+        "position"
+      ],
+      "nameExplicit": false,
+      "name": "media_chapters_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "columns": [
+        "profile_id",
+        "media_entry_id"
+      ],
+      "nameExplicit": false,
+      "name": "playback_progress_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "external_subtitles_pkey",
+      "schema": "public",
+      "table": "external_subtitles",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "media_entries_pkey",
+      "schema": "public",
+      "table": "media_entries",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "media_roots_pkey",
+      "schema": "public",
+      "table": "media_roots",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "media_tracks_pkey",
+      "schema": "public",
+      "table": "media_tracks",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "playlist_items_pkey",
+      "schema": "public",
+      "table": "playlist_items",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "playlists_pkey",
+      "schema": "public",
+      "table": "playlists",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "profiles_pkey",
+      "schema": "public",
+      "table": "profiles",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "scan_errors_pkey",
+      "schema": "public",
+      "table": "scan_errors",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "scan_run_id"
+      ],
+      "nameExplicit": false,
+      "name": "scan_jobs_pkey",
+      "schema": "public",
+      "table": "scan_jobs",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "scan_runs_pkey",
+      "schema": "public",
+      "table": "scan_runs",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "track_plays_pkey",
+      "schema": "public",
+      "table": "track_plays",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "youtube_downloads_pkey",
+      "schema": "public",
+      "table": "youtube_downloads",
+      "entityType": "pks"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "media_entry_id",
+        "relative_path"
+      ],
+      "nullsNotDistinct": false,
+      "name": "subtitle_entry_path",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "media_root_id",
+        "relative_path"
+      ],
+      "nullsNotDistinct": false,
+      "name": "entry_root_path",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "path"
+      ],
+      "nullsNotDistinct": false,
+      "name": "media_root_path",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "media_entry_id",
+        "stream_index"
+      ],
+      "nullsNotDistinct": false,
+      "name": "track_entry_stream",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "playlist_id",
+        "media_entry_id"
+      ],
+      "nullsNotDistinct": false,
+      "name": "playlist_media",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "value": "\"format\" in ('srt','vtt')",
+      "name": "subtitle_format",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "external_subtitles"
+    },
+    {
+      "value": "\"position\" >= 0 and \"start_ms\" >= 0",
+      "name": "chapter_non_negative",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "value": "\"end_ms\" > \"start_ms\"",
+      "name": "chapter_order",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_chapters"
+    },
+    {
+      "value": "\"kind\" in ('directory','file')",
+      "name": "entry_kind",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "value": "\"probe_status\" in ('not_required','pending','ok','failed')",
+      "name": "entry_probe_status",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "value": "not (\"is_video\" and \"is_audio\") and (\"kind\" = 'file' or not (\"is_video\" or \"is_audio\"))",
+      "name": "entry_media_flags",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "value": "\"size_bytes\" >= 0 and \"duration_ms\" >= 0 and \"sort_order\" >= 0 and \"track_number\" >= 0 and \"audio_bitrate\" >= 0 and \"audio_sample_rate\" >= 0 and \"audio_bit_depth\" >= 0 and \"audio_channels\" >= 0 and \"width\" >= 0 and \"height\" >= 0",
+      "name": "entry_non_negative",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_entries"
+    },
+    {
+      "value": "\"media_type\" in ('video','music')",
+      "name": "media_root_type",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "value": "\"display_order\" >= 0",
+      "name": "media_root_display_order",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "value": "\"source\" in ('folder','youtube')",
+      "name": "media_root_source",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_roots"
+    },
+    {
+      "value": "\"kind\" in ('video','audio','subtitle')",
+      "name": "track_kind",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "value": "\"stream_index\" >= 0 and \"channels\" >= 0 and \"bitrate\" >= 0 and \"sample_rate\" >= 0 and \"bit_depth\" >= 0 and \"width\" >= 0 and \"height\" >= 0",
+      "name": "track_non_negative",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "media_tracks"
+    },
+    {
+      "value": "\"position_ms\" >= 0 and \"duration_ms\" >= 0",
+      "name": "progress_non_negative",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "playback_progress"
+    },
+    {
+      "value": "\"position\" >= 0",
+      "name": "playlist_item_position",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "playlist_items"
+    },
+    {
+      "value": "length(trim(\"name\")) between 1 and 80",
+      "name": "playlist_name_length",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "playlists"
+    },
+    {
+      "value": "length(trim(\"name\")) between 1 and 50",
+      "name": "profile_name_length",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "profiles"
+    },
+    {
+      "value": "\"stage\" in ('walk','probe')",
+      "name": "scan_error_stage",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "scan_errors"
+    },
+    {
+      "value": "\"state\" in ('pending','running','completed','failed')",
+      "name": "scan_job_state",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "value": "\"attempts\" >= 0 and \"max_attempts\" >= 1",
+      "name": "scan_job_attempts",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "value": "case when \"state\" = 'running' then \"locked_by\" is not null and \"locked_until\" is not null else \"locked_by\" is null and \"locked_until\" is null end",
+      "name": "scan_job_lease",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "value": "(\"state\" in ('completed','failed')) = (\"finished_at\" is not null)",
+      "name": "scan_job_finished_at",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "scan_jobs"
+    },
+    {
+      "value": "\"state\" in ('queued','running','retrying','completed','failed')",
+      "name": "scan_state",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "value": "\"directories_seen\" >= 0 and \"files_seen\" >= 0 and \"videos_seen\" >= 0 and \"audio_seen\" >= 0 and \"files_probed\" >= 0 and \"errors_count\" >= 0 and \"attempts\" >= 0",
+      "name": "scan_counts_non_negative",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "scan_runs"
+    },
+    {
+      "value": "\"state\" in ('queued','downloading','indexing','completed','failed')",
+      "name": "youtube_download_state",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "youtube_downloads"
+    },
+    {
+      "value": "\"duration_ms\" >= 0 and \"downloaded_bytes\" >= 0 and \"total_bytes\" >= 0",
+      "name": "youtube_download_non_negative",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "youtube_downloads"
+    }
+  ],
+  "renames": []
+}

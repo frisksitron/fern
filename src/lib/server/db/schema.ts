@@ -48,12 +48,18 @@ export const mediaRoots = pgTable(
     mediaType: text('media_type').notNull(),
     displayOrder: integer('display_order').notNull().default(0),
     lastScannedAt: timestamp('last_scanned_at', { withTimezone: true }),
+    /** `folder`: a folder a user added. `youtube`: Fern's own library of YouTube downloads (`DOWNLOADS_DIR`). */
+    source: text('source').notNull().default('folder'),
     ...times,
   },
   (t) => [
     unique('media_root_path').on(t.path),
     check('media_root_type', sql`${t.mediaType} in ('video','music')`),
     check('media_root_display_order', nonNegative(t.displayOrder)),
+    check('media_root_source', sql`${t.source} in ('folder','youtube')`),
+    uniqueIndex('media_root_single_youtube')
+      .on(t.source)
+      .where(sql`${t.source} = 'youtube'`),
   ],
 );
 
@@ -200,6 +206,26 @@ export const mediaTracks = pgTable(
   ],
 );
 
+/** The chapters a file names, such as the songs of a DJ mix, read from the file by ffprobe. */
+export const mediaChapters = pgTable(
+  'media_chapters',
+  {
+    mediaEntryId: uuid('media_entry_id')
+      .notNull()
+      .references(() => mediaEntries.id, { onDelete: 'cascade' }),
+    /** The chapter's place in the file, from 0. */
+    position: integer('position').notNull(),
+    startMs: bigint('start_ms', { mode: 'number' }).notNull(),
+    endMs: bigint('end_ms', { mode: 'number' }).notNull(),
+    title: text('title'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.mediaEntryId, t.position] }),
+    check('chapter_non_negative', nonNegative(t.position, t.startMs)),
+    check('chapter_order', sql`${t.endMs} > ${t.startMs}`),
+  ],
+);
+
 export const externalSubtitles = pgTable(
   'external_subtitles',
   {
@@ -261,6 +287,41 @@ export const trackPlays = pgTable(
     index('track_play_recent').on(t.profileId, t.playedAt),
     index('track_play_profile_media').on(t.profileId, t.mediaEntryId),
     index('track_play_media').on(t.mediaEntryId),
+  ],
+);
+
+// Download states mirror YouTubeDownloadState in $lib/shared/contracts/youtube.
+/** A YouTube video's audio, saved into the YouTube library (see `$lib/server/youtube`). */
+export const youtubeDownloads = pgTable(
+  'youtube_downloads',
+  {
+    id: uuid('id').primaryKey(),
+    videoId: text('video_id').notNull(),
+    url: text('url').notNull(),
+    state: text('state').notNull().default('queued'),
+    /** Known once yt-dlp has read the video's page. */
+    title: text('title'),
+    channel: text('channel'),
+    durationMs: bigint('duration_ms', { mode: 'number' }),
+    downloadedBytes: bigint('downloaded_bytes', { mode: 'number' }),
+    totalBytes: bigint('total_bytes', { mode: 'number' }),
+    /** The saved file, relative to the YouTube library. */
+    relativePath: text('relative_path'),
+    /** The song in the library, once a scan has indexed the saved file. */
+    mediaEntryId: uuid('media_entry_id').references(() => mediaEntries.id, { onDelete: 'set null' }),
+    errorMessage: text('error_message'),
+    ...times,
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('youtube_download_recent').on(t.createdAt),
+    index('youtube_download_media').on(t.mediaEntryId),
+    check('youtube_download_state', sql`${t.state} in ('queued','downloading','indexing','completed','failed')`),
+    check('youtube_download_non_negative', nonNegative(t.durationMs, t.downloadedBytes, t.totalBytes)),
+    // A video is downloaded once at a time.
+    uniqueIndex('youtube_download_single_active')
+      .on(t.videoId)
+      .where(sql`${t.state} in ('queued','downloading','indexing')`),
   ],
 );
 

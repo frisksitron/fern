@@ -7,7 +7,7 @@ import { MediaProcessRunner, type ProcessRequest } from '../../src/lib/server/me
 
 // Node stands in for FFmpeg: each test scripts the process behavior it needs.
 const nodeRunner = MediaProcessRunner.layerFor(
-  { ffmpeg: process.execPath, ffprobe: process.execPath },
+  { ffmpeg: process.execPath, ffprobe: process.execPath, 'yt-dlp': process.execPath },
   { killGrace: '300 millis' },
 );
 
@@ -117,6 +117,7 @@ describe('MediaProcessRunner', () => {
     const missing = MediaProcessRunner.layerFor({
       ffmpeg: path.join(directory, 'missing-ffmpeg'),
       ffprobe: path.join(directory, 'missing-ffprobe'),
+      'yt-dlp': path.join(directory, 'missing-yt-dlp'),
     });
     expect(await run(script(''), missing)).toMatchObject({
       _tag: 'Failure',

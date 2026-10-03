@@ -10,7 +10,7 @@ import { MediaProcessRunner, type ProcessError } from '$lib/server/media/process
 import { makeCapacity, makeSharedWork, makeThrottled, type CapacityExceeded } from '$lib/server/media/work';
 import type { MediaEntryId } from '$lib/shared/contracts/ids';
 import { encodeTrackMap } from '$lib/shared/contracts/track-map';
-import { ANALYSIS_VERSION, loudnessMeter, mapSong, SAMPLE_RATE } from './analysis';
+import { ANALYSIS_VERSION, loudnessMeter, mapTrack, SAMPLE_RATE } from './analysis';
 
 /** FFmpeg could not decode the track's audio, for example from a file without any. */
 export class TrackMapFailed extends Data.TaggedError('TrackMapFailed')<{ readonly cause: ProcessError }> {}
@@ -69,9 +69,9 @@ export class TrackMaps extends Context.Service<TrackMaps>()('fern/TrackMaps', {
       '1 minute',
     );
 
-    type Track = { readonly path: string; readonly durationMs: number | null };
+    type Track = { readonly path: string; readonly durationMs: number | null; readonly chapterStarts: number[] };
 
-    const generate = ({ path: input, durationMs }: Track, output: string) => {
+    const generate = ({ path: input, durationMs, chapterStarts }: Track, output: string) => {
       const temporary = `${output}.${randomUUID()}.tmp.json`;
       return Effect.gen(function* () {
         yield* io(() => mkdir(directory, { recursive: true }));
@@ -100,7 +100,7 @@ export class TrackMaps extends Context.Service<TrackMaps>()('fern/TrackMaps', {
             onStdout: (chunk) => meter.write(chunk),
           })
           .pipe(Effect.mapError((cause) => new TrackMapFailed({ cause })));
-        const map = mapSong(meter.finish());
+        const map = mapTrack(meter.finish(), chapterStarts);
         yield* io(() => writeFile(temporary, JSON.stringify(encodeTrackMap(map))));
         yield* io(() => rename(temporary, output));
         yield* sweepCache;
@@ -115,7 +115,12 @@ export class TrackMaps extends Context.Service<TrackMaps>()('fern/TrackMaps', {
           try: () => stat(media.path),
           catch: () => new MediaFileUnavailable({ path: media.path, reason: 'missing' }),
         });
-        const key = createHash('sha256').update(`${id}:${info.size}:${info.mtimeMs}:${ANALYSIS_VERSION}`).digest('hex');
+        // Chapters are read from the file, but only once it is scanned again (after a scanner
+        // update, say), so the map is made again when they change.
+        const chapterStarts = yield* library.chapterStarts(id);
+        const key = createHash('sha256')
+          .update(`${id}:${info.size}:${info.mtimeMs}:${ANALYSIS_VERSION}:${chapterStarts.join(',')}`)
+          .digest('hex');
         const file = path.join(directory, `${key}.json`);
         const read = Effect.promise(() =>
           readFile(file).then(
@@ -130,7 +135,12 @@ export class TrackMaps extends Context.Service<TrackMaps>()('fern/TrackMaps', {
           return { contents: cached, key };
         }
         yield* shared
-          .run(file, capacity.withCapacity(generate({ path: media.path, durationMs: media.entry.durationMs }, file)))
+          .run(
+            file,
+            capacity.withCapacity(
+              generate({ path: media.path, durationMs: media.entry.durationMs, chapterStarts }, file),
+            ),
+          )
           .pipe(Effect.annotateLogs({ cacheKey: key }));
         const contents = yield* read;
         if (!contents) return yield* Effect.die(new Error('Generated track map is missing'));

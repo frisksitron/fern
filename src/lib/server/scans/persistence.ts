@@ -1,7 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { Effect } from 'effect';
-import { externalSubtitles, mediaEntries, mediaRoots, mediaTracks, scanErrors, scanRuns } from '$lib/server/db/schema';
+import {
+  externalSubtitles,
+  mediaChapters,
+  mediaEntries,
+  mediaRoots,
+  mediaTracks,
+  scanErrors,
+  scanRuns,
+} from '$lib/server/db/schema';
 import {
   orUnavailable,
   type DatabaseUnavailable,
@@ -172,7 +180,7 @@ function trackRows(entryId: string, tracks: readonly NormalizedTrack[]) {
   return tracks.map((track) => ({ id: randomUUID(), mediaEntryId: entryId, ...track }));
 }
 
-/** Stores one batch of probe results in a single transaction, replacing each entry's tracks. */
+/** Stores one batch of probe results in a single transaction, replacing each entry's tracks and chapters. */
 export function writeProbeOutcomes(
   db: FernDatabase,
   scanId: string,
@@ -211,9 +219,16 @@ export function writeProbeOutcomes(
             .where(eq(mediaEntries.id, id));
         }
         const touched = outcomes.map((outcome) => outcome.id);
-        if (touched.length) yield* tx.delete(mediaTracks).where(inArray(mediaTracks.mediaEntryId, touched));
+        if (touched.length) {
+          yield* tx.delete(mediaTracks).where(inArray(mediaTracks.mediaEntryId, touched));
+          yield* tx.delete(mediaChapters).where(inArray(mediaChapters.mediaEntryId, touched));
+        }
         const tracks = succeeded.flatMap(({ id, result }) => trackRows(id, result.tracks));
         for (const batch of chunks(tracks, WRITE_BATCH_SIZE)) yield* tx.insert(mediaTracks).values(batch);
+        const chapters = succeeded.flatMap(({ id, result }) =>
+          result.chapters.map((chapter) => ({ mediaEntryId: id, ...chapter })),
+        );
+        for (const batch of chunks(chapters, WRITE_BATCH_SIZE)) yield* tx.insert(mediaChapters).values(batch);
         if (failed.length) {
           yield* tx
             .update(mediaEntries)

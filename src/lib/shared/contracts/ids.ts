@@ -26,6 +26,9 @@ export type TrackPlayId = typeof TrackPlayId.Type;
 export const ScanId = Uuid.pipe(Schema.brand('ScanId'));
 export type ScanId = typeof ScanId.Type;
 
+export const YouTubeDownloadId = Uuid.pipe(Schema.brand('YouTubeDownloadId'));
+export type YouTubeDownloadId = typeof YouTubeDownloadId.Type;
+
 /** An external subtitle file (`external_subtitles.id`). Embedded subtitles use stream indexes. */
 export const SubtitleId = Uuid.pipe(Schema.brand('SubtitleId'));
 export type SubtitleId = typeof SubtitleId.Type;

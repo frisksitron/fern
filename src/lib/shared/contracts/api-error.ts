@@ -19,6 +19,7 @@ export const ApiErrorCode = Schema.Literals([
   'media_root.overlap',
   'media_root.not_found',
   'media_root.scan_active',
+  'media_root.managed',
   'media.not_found',
   'media.file_missing',
   'media.duration_unknown',
@@ -39,6 +40,11 @@ export const ApiErrorCode = Schema.Literals([
   'music.folder_too_large',
   'scan.not_found',
   'scan.already_running',
+  'youtube.url_invalid',
+  'youtube.already_downloading',
+  'youtube.download_not_found',
+  'youtube.download_not_failed',
+  'youtube.library_unavailable',
 ]);
 export type ApiErrorCode = typeof ApiErrorCode.Type;
 

@@ -5,7 +5,7 @@ import { Cause, Clock, Context, Data, Duration, Effect, Exit, Layer, Option } fr
 import { FernConfig } from '$lib/server/config';
 
 /** The only programs Fern runs. Callers name a program; the runner owns the executable paths. */
-export type MediaProgram = 'ffmpeg' | 'ffprobe';
+export type MediaProgram = 'ffmpeg' | 'ffprobe' | 'yt-dlp';
 
 export class ProcessSpawnFailed extends Data.TaggedError('ProcessSpawnFailed')<{
   readonly program: MediaProgram;
@@ -102,7 +102,7 @@ function resolveExecutable(command: string) {
   return command;
 }
 
-/** Runs FFmpeg and ffprobe. No other module spawns processes. */
+/** Runs FFmpeg, ffprobe, and yt-dlp. No other module spawns processes. */
 export class MediaProcessRunner extends Context.Service<
   MediaProcessRunner,
   { readonly run: (request: ProcessRequest) => Effect.Effect<ProcessOutput, ProcessError> }
@@ -115,13 +115,14 @@ export class MediaProcessRunner extends Context.Service<
     return Layer.effect(this, makeRunner(executables, options));
   }
 
-  /** Uses `FFMPEG_PATH` and `FFPROBE_PATH`. */
+  /** Uses `FFMPEG_PATH`, `FFPROBE_PATH`, and `YTDLP_PATH`. */
   static readonly layer = Layer.unwrap(
     Effect.gen(function* () {
       const config = yield* FernConfig;
       return MediaProcessRunner.layerFor({
         ffmpeg: resolveExecutable(config.FFMPEG_PATH),
         ffprobe: resolveExecutable(config.FFPROBE_PATH),
+        'yt-dlp': resolveExecutable(config.YTDLP_PATH),
       });
     }),
   );

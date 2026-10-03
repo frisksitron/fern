@@ -12,7 +12,8 @@
   import { registerMusicClock } from '$lib/client/music-clock';
   import { MUSIC_FX_PATH, closeMusicFx, openMusicFx } from '$lib/client/music-fx';
   import { readProfileId } from '$lib/client/profile';
-  import { recordTrackPlay } from '$lib/client/zero/data';
+  import { recordTrackPlay, watchChapters, type MediaChapter } from '$lib/client/zero/data';
+  import { chapterIndexAt, formatClock, nextChapterStart, previousChapterStart } from '$lib/music/chapters';
   import { PlayCounter } from '$lib/music/plays';
 
   const volumeStorageKey = 'fern:music-volume';
@@ -31,6 +32,78 @@
     $musicPlayer.sourceHref ??
       (current ? `/music/${current.mediaRootId}${current.parentId ? `/${current.parentId}` : ''}` : null),
   );
+  // Chapters split a long file, such as a DJ mix, into its songs: previous and next move between
+  // them, and the seek bar marks where each starts.
+  let chapters = $state<readonly MediaChapter[]>([]);
+  let chapterIndex = $derived(chapterIndexAt(chapters, elapsed * 1000));
+  let chapter = $derived(chapters[chapterIndex]);
+  let chapterListOpen = $state(false);
+  let footer = $state<HTMLElement>();
+  let chapterListBottom = $state(0);
+  let canGoPrevious = $derived($musicPlayer.index > 0 || previousChapterStart(chapters, elapsed * 1000) !== null);
+  let canGoNext = $derived(
+    $musicPlayer.loop ||
+      $musicPlayer.index < $musicPlayer.queue.length - 1 ||
+      nextChapterStart(chapters, elapsed * 1000) !== null,
+  );
+
+  $effect(() => {
+    const trackId = current?.id;
+    chapters = [];
+    chapterListOpen = false;
+    if (!trackId) return;
+    return watchChapters(trackId, (rows, resultType) => {
+      if (resultType !== 'error') chapters = rows;
+    });
+  });
+
+  /** The next chapter, or the next song after the last chapter. */
+  function next() {
+    const start = nextChapterStart(chapters, elapsed * 1000);
+    if (start === null) nextTrack();
+    else seekTo(start / 1000);
+  }
+
+  /** Back to the chapter's start, the chapter before, or the previous song. */
+  function previous() {
+    const start = previousChapterStart(chapters, elapsed * 1000);
+    if (start === null) previousTrack();
+    else seekTo(start / 1000);
+  }
+
+  function playChapter(target: MediaChapter) {
+    seekTo(target.startMs / 1000);
+    if (audio?.paused) play();
+    chapterListOpen = false;
+  }
+
+  function toggleChapterList(event: MouseEvent) {
+    // The window's click handler would close the list again.
+    event.stopPropagation();
+    if (!chapterListOpen && footer) chapterListBottom = window.innerHeight - footer.getBoundingClientRect().top + 8;
+    chapterListOpen = !chapterListOpen;
+  }
+
+  let chapterList = $state<HTMLElement>();
+
+  // Opening the list shows the playing chapter.
+  $effect(() => {
+    if (chapterListOpen) chapterList?.querySelector('[aria-current]')?.scrollIntoView({ block: 'nearest' });
+  });
+
+  function closeChapterListOutside(event: MouseEvent) {
+    if (chapterListOpen && !chapterList?.contains(event.target as Node)) chapterListOpen = false;
+  }
+
+  function chapterTitle(target: MediaChapter | undefined, index: number) {
+    return target?.title ?? `Chapter ${index + 1}`;
+  }
+
+  /** Where a chapter starts on the seek bar, allowing for the thumb, which never leaves the bar. */
+  function chapterMark(target: MediaChapter) {
+    const fraction = duration > 0 ? Math.min(1, target.startMs / 1000 / duration) : 0;
+    return `left: calc(6.5px + (100% - 13px) * ${fraction})`;
+  }
 
   onMount(() => {
     const storedVolume = localStorage.getItem(volumeStorageKey);
@@ -61,8 +134,8 @@
     const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
       ['play', () => play()],
       ['pause', () => audio?.pause()],
-      ['previoustrack', previousTrack],
-      ['nexttrack', nextTrack],
+      ['previoustrack', previous],
+      ['nexttrack', next],
       ['seekto', (details) => details.seekTime !== undefined && seekTo(details.seekTime)],
     ];
     const setHandler = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
@@ -83,10 +156,11 @@
   $effect(() => {
     const session = mediaSession();
     if (!session || !current || typeof MediaMetadata === 'undefined') return;
+    // In a mix, the lock screen names the song playing in it, and the mix takes the album's place.
     session.metadata = new MediaMetadata({
-      title: trackTitle(),
+      title: chapter?.title ?? trackTitle(),
       artist: current.artist ?? '',
-      album: current.album ?? '',
+      album: chapter?.title ? trackTitle() : (current.album ?? ''),
       artwork: [{ src: new URL(`/api/media/${current.id}/artwork`, location.origin).href }],
     });
   });
@@ -191,12 +265,6 @@
     localStorage.setItem(volumeStorageKey, String(volume));
   }
 
-  function formatTime(value: number) {
-    if (!Number.isFinite(value)) return '0:00';
-    const seconds = Math.floor(value);
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  }
-
   function trackTitle() {
     return current?.title ?? current?.name.replace(/\.[^.]+$/, '') ?? '';
   }
@@ -233,8 +301,41 @@
   }
 </script>
 
+<svelte:window
+  onclick={closeChapterListOutside}
+  onkeydown={(event) => event.key === 'Escape' && (chapterListOpen = false)}
+/>
+
+{#snippet seekBar()}
+  <div class="relative">
+    <input
+      class="music-range music-seek block w-full"
+      style={`--range-progress:${rangeProgress(elapsed, duration)}`}
+      type="range"
+      min="0"
+      max={duration || 0}
+      value={elapsed}
+      oninput={seek}
+      aria-label="Track position"
+    />
+    <!-- Gaps in the bar where chapters start, as on YouTube. -->
+    {#each chapters.slice(1) as mark (mark.position)}
+      <span
+        class="pointer-events-none absolute top-1/2 h-[5px] w-0.5 -translate-x-1/2 -translate-y-1/2 bg-white"
+        style={chapterMark(mark)}
+      ></span>
+    {/each}
+  </div>
+{/snippet}
+
+{#snippet chapterLabel()}
+  <span class="text-fern-accent">{chapterIndex + 1}/{chapters.length}</span>
+  <span class="min-w-0 truncate">{chapterTitle(chapter, chapterIndex)}</span>
+{/snippet}
+
 {#if current}
   <footer
+    bind:this={footer}
     data-fx-player
     class="fixed inset-x-0 bottom-0 z-40 isolate overflow-hidden border-t border-black bg-white pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-[0_-4px_0_rgba(0,0,0,.08)] sm:mx-auto sm:mb-[calc(1rem+env(safe-area-inset-bottom))] sm:w-[calc(100%-2rem)] sm:max-w-3xl sm:border sm:p-0"
   >
@@ -242,16 +343,7 @@
     <div
       class="absolute top-0 right-[calc(0.75rem+env(safe-area-inset-right))] left-[calc(0.75rem+env(safe-area-inset-left))] z-1 sm:hidden"
     >
-      <input
-        class="music-range music-seek block w-full"
-        style={`--range-progress:${rangeProgress(elapsed, duration)}`}
-        type="range"
-        min="0"
-        max={duration || 0}
-        value={elapsed}
-        oninput={seek}
-        aria-label="Track position"
-      />
+      {@render seekBar()}
     </div>
 
     <div class="relative px-3 pt-8 pb-3 sm:px-4 sm:pt-3">
@@ -293,8 +385,22 @@
             <p class="truncate text-xs leading-4 text-[#6b6b67]">
               {current.artist ?? current.name}{current.album ? ` · ${current.album}` : ''}
             </p>
+            {#if chapter}
+              <!-- Phones show the playing chapter where wider screens show the audio format. -->
+              <button
+                class="mt-1 flex max-w-full cursor-pointer items-center gap-1.5 overflow-hidden border-0 bg-transparent p-0 text-left text-[10px] leading-4 font-semibold whitespace-nowrap text-[#414141] sm:hidden"
+                onclick={toggleChapterList}
+                aria-expanded={chapterListOpen}
+                aria-label={`Chapter ${chapterIndex + 1} of ${chapters.length}: ${chapterTitle(chapter, chapterIndex)}. Show chapters`}
+              >
+                {@render chapterLabel()}
+              </button>
+            {/if}
             <div
-              class="mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[9px] font-semibold tracking-[.1em] text-[#6b6b67]"
+              class={[
+                'mt-1 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[9px] font-semibold tracking-[.1em] text-[#6b6b67]',
+                chapter ? 'hidden sm:flex' : 'flex',
+              ]}
             >
               <span>{audioFormat()}</span>
               {#if isHighResolution()}<span class="text-fern-accent">HI-RES</span>{/if}
@@ -343,9 +449,9 @@
           </button>
           <button
             class="grid size-10 cursor-pointer place-items-center border-0 bg-transparent text-[#6b6b67] transition hover:bg-[#e8e8e2] hover:text-black disabled:cursor-default disabled:opacity-25"
-            disabled={$musicPlayer.index <= 0}
-            onclick={previousTrack}
-            aria-label="Previous track"
+            disabled={!canGoPrevious}
+            onclick={previous}
+            aria-label={chapters.length ? 'Previous chapter' : 'Previous track'}
           >
             <svg class="size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
               ><path d="M6 5h2v14H6zm3 7 9-7v14z" /></svg
@@ -368,9 +474,9 @@
           </button>
           <button
             class="grid size-10 cursor-pointer place-items-center border-0 bg-transparent text-[#6b6b67] transition hover:bg-[#e8e8e2] hover:text-black disabled:cursor-default disabled:opacity-25"
-            disabled={!$musicPlayer.loop && $musicPlayer.index >= $musicPlayer.queue.length - 1}
-            onclick={nextTrack}
-            aria-label="Next track"
+            disabled={!canGoNext}
+            onclick={next}
+            aria-label={nextChapterStart(chapters, elapsed * 1000) !== null ? 'Next chapter' : 'Next track'}
           >
             <svg class="size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
               ><path d="m6 5 9 7-9 7zm10 0h2v14h-2z" /></svg
@@ -405,18 +511,20 @@
       </div>
 
       <div class="mt-3 hidden border-t border-dotted border-black pt-2 sm:block">
-        <input
-          class="music-range music-seek block w-full"
-          style={`--range-progress:${rangeProgress(elapsed, duration)}`}
-          type="range"
-          min="0"
-          max={duration || 0}
-          value={elapsed}
-          oninput={seek}
-          aria-label="Track position"
-        />
-        <div class="mt-0.5 flex justify-between text-[10px] font-medium tabular-nums text-[#6b6b67]">
-          <span>{formatTime(elapsed)}</span><span>{formatTime(duration)}</span>
+        {@render seekBar()}
+        <div class="mt-0.5 flex justify-between gap-4 text-[10px] font-medium tabular-nums text-[#6b6b67]">
+          <span>{formatClock(elapsed)}</span>
+          {#if chapters.length}
+            <button
+              class="flex min-w-0 cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 font-semibold text-[#414141] hover:text-black hover:underline"
+              onclick={toggleChapterList}
+              aria-expanded={chapterListOpen}
+              aria-label="Show chapters"
+            >
+              {#if chapter}{@render chapterLabel()}{:else}{chapters.length} chapters{/if}
+            </button>
+          {/if}
+          <span>{formatClock(duration)}</span>
         </div>
       </div>
     </div>
@@ -444,4 +552,39 @@
       onended={nextTrack}
     ></audio>
   </footer>
+  {#if chapterListOpen && chapters.length}
+    <section
+      bind:this={chapterList}
+      class="fixed inset-x-3 z-50 border border-black bg-white shadow-[0_4px_0_rgba(0,0,0,.08)] sm:mx-auto sm:w-[calc(100%-2rem)] sm:max-w-3xl"
+      style={`bottom:${chapterListBottom}px`}
+      aria-label="Chapters"
+    >
+      <header class="flex items-center justify-between border-b border-dotted border-black py-1 pr-1 pl-3">
+        <h2 class="text-xs font-bold uppercase">Chapters / {chapters.length}</h2>
+        <button
+          class="grid size-9 cursor-pointer place-items-center border-0 bg-transparent text-[#6b6b67] hover:bg-[#e8e8e2] hover:text-black"
+          onclick={() => (chapterListOpen = false)}
+          aria-label="Close chapters">✕</button
+        >
+      </header>
+      <ol class="max-h-[min(50dvh,24rem)] overflow-y-auto py-1">
+        {#each chapters as item, index (item.position)}
+          <li>
+            <button
+              class={[
+                'grid min-h-10 w-full cursor-pointer grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 border-0 bg-transparent px-3 text-left text-sm hover:bg-[#e8e8e2]',
+                index === chapterIndex ? 'font-semibold text-fern-accent' : 'text-black',
+              ]}
+              onclick={() => playChapter(item)}
+              aria-current={index === chapterIndex ? 'true' : undefined}
+            >
+              <span class="text-xs tabular-nums text-[#6b6b67]">{index + 1}</span>
+              <span class="truncate">{chapterTitle(item, index)}</span>
+              <span class="text-xs tabular-nums text-[#6b6b67]">{formatClock(item.startMs / 1000)}</span>
+            </button>
+          </li>
+        {/each}
+      </ol>
+    </section>
+  {/if}
 {/if}

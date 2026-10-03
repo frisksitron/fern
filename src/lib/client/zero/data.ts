@@ -3,9 +3,27 @@ import { createId, getZero, mutate } from './client';
 import { queries } from '$lib/zero/queries';
 import { mutators } from '$lib/zero/mutators';
 import { QUERY_ID_LIMIT } from '$lib/zero/limits';
-import type { MediaEntry, MediaRoot, PlaybackProgress, Playlist, PlaylistItem, Profile } from '$lib/zero/schema';
+import type {
+  MediaChapter,
+  MediaEntry,
+  MediaRoot,
+  PlaybackProgress,
+  Playlist,
+  PlaylistItem,
+  Profile,
+  YoutubeDownload,
+} from '$lib/zero/schema';
 
-export type { MediaEntry, MediaRoot, PlaybackProgress, Playlist, PlaylistItem, Profile } from '$lib/zero/schema';
+export type {
+  MediaChapter,
+  MediaEntry,
+  MediaRoot,
+  PlaybackProgress,
+  Playlist,
+  PlaylistItem,
+  Profile,
+  YoutubeDownload,
+} from '$lib/zero/schema';
 
 export type SyncStatus = ResultType;
 export type SyncError = ErroredQuery;
@@ -130,6 +148,24 @@ export function watchMusicChildren(
   listener: QueryListener<readonly MediaEntry[]>,
 ) {
   const view = getZero().materialize(queries.mediaEntries.musicChildren({ rootId, parentId }));
+  return cleanup(
+    view.addListener((data, resultType, error) => listener(data, resultType, error)),
+    () => view.destroy(),
+  );
+}
+
+/** A song's chapters, in order; empty for songs without any. */
+export function watchChapters(mediaEntryId: string, listener: QueryListener<readonly MediaChapter[]>) {
+  const view = getZero().materialize(queries.chapters.forMedia({ mediaEntryId }));
+  return cleanup(
+    view.addListener((data, resultType, error) => listener(data, resultType, error)),
+    () => view.destroy(),
+  );
+}
+
+/** The latest YouTube downloads, newest first, with their progress. */
+export function watchYouTubeDownloads(listener: QueryListener<readonly YoutubeDownload[]>) {
+  const view = getZero().materialize(queries.youtubeDownloads.recent());
   return cleanup(
     view.addListener((data, resultType, error) => listener(data, resultType, error)),
     () => view.destroy(),

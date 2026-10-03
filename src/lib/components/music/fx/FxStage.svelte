@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { onClockFrame } from '$lib/client/music-clock';
   import { musicPlayer } from '$lib/client/music-player';
+  import { watchChapters, type MediaChapter } from '$lib/client/zero/data';
+  import { chapterIndexAt } from '$lib/music/chapters';
   import { trackTitle } from '$lib/music/tracks';
   import { fitCanvas, playerBox } from './canvas';
   import { EFFECTS } from './effects';
@@ -66,6 +68,9 @@
     let score: Score | null = null;
     // The playing song's text, for the effects to write, upper case.
     let song: Song = { title: '', artist: '', album: '' };
+    // A mix's chapters: the effects write the title of the song playing in it, the mix's in the album's place.
+    let chapters: readonly MediaChapter[] = [];
+    let stopChapters = () => {};
     const stopReading = musicPlayer.subscribe(({ queue, index }) => {
       const track = queue[index];
       song = {
@@ -77,6 +82,13 @@
         const id = (playing = track?.id ?? null);
         score = null;
         scoring = 'reading';
+        stopChapters();
+        chapters = [];
+        stopChapters = id
+          ? watchChapters(id, (rows, resultType) => {
+              if (resultType !== 'error') chapters = rows;
+            })
+          : () => {};
         if (id)
           void trackMap(id).then((map) => {
             if (id !== playing) return;
@@ -91,12 +103,15 @@
 
     const stop = onClockFrame((position) => {
       const effect = EFFECTS[index];
-      renderer.draw({ effect, score, position, box: playerBox(), texts: effect.texts?.(song) ?? [] });
+      const chapter = chapters[chapterIndexAt(chapters, position * 1000)];
+      const text = chapter?.title ? { ...song, title: chapter.title.toUpperCase(), album: song.title } : song;
+      renderer.draw({ effect, score, position, box: playerBox(), texts: effect.texts?.(text) ?? [] });
     });
 
     return () => {
       stop();
       stopReading();
+      stopChapters();
       stopFitting();
       renderer.destroy();
     };

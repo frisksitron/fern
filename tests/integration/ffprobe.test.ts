@@ -72,3 +72,61 @@ it('reports broken media', { timeout: 30000 }, async () => {
     failure: { _tag: 'ProbeFailed', cause: { _tag: 'ProcessExited' } },
   });
 });
+
+it('reads chapters, and the tags Opus files keep on their audio stream', { timeout: 30000 }, async () => {
+  // A mix as yt-dlp saves one: Ogg Opus with its title, artist, and chapters embedded.
+  const metadata = path.join(fixtures, 'mix.txt');
+  await writeFile(
+    metadata,
+    [
+      ';FFMETADATA1',
+      'title=Late Mix',
+      'artist=Chrysalis',
+      '[CHAPTER]',
+      'TIMEBASE=1/1000',
+      'START=0',
+      'END=1200',
+      'title=Intro',
+      '[CHAPTER]',
+      'TIMEBASE=1/1000',
+      'START=1200',
+      'END=5000',
+      'title=Second Song',
+      '',
+    ].join('\n'),
+  );
+  const mix = path.join(fixtures, 'mix.opus');
+  const ffmpeg = spawnSync(
+    process.env.FFMPEG_PATH ?? 'ffmpeg',
+    [
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=440:duration=3',
+      '-i',
+      metadata,
+      '-map_metadata',
+      '1',
+      '-map_chapters',
+      '1',
+      '-c:a',
+      'libopus',
+      mix,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (ffmpeg.status !== 0) throw new Error(`FFmpeg fixture generation failed: ${ffmpeg.stderr || ffmpeg.error}`);
+
+  const outcome = await probe(mix);
+  if (outcome._tag !== 'Success') throw new Error('probe failed');
+  expect(outcome.success).toMatchObject({ title: 'Late Mix', artist: 'Chrysalis', audioCodecSummary: 'opus' });
+  // The last chapter ends after the audio does, so it is cut at the file's duration.
+  expect(outcome.success.chapters).toEqual([
+    { position: 0, startMs: 0, endMs: 1200, title: 'Intro' },
+    { position: 1, startMs: 1200, endMs: outcome.success.durationMs, title: 'Second Song' },
+  ]);
+});
