@@ -15,6 +15,7 @@ export interface MediaElement {
   readonly paused: boolean;
   readonly readyState: number;
   readonly seekable: { readonly length: number; end(index: number): number };
+  readonly error?: { readonly code: number } | null;
   readonly textTracks: { readonly length: number; readonly [index: number]: { mode: TextTrackMode } };
   src: string;
   play(): Promise<void>;
@@ -23,10 +24,21 @@ export interface MediaElement {
   removeEventListener(type: string, listener: (event: Event) => void): void;
 }
 
+/** An hls.js error, reduced to what the controller decides on. */
+export interface HlsFailure {
+  /** hls.js retries what is not fatal on its own. */
+  readonly fatal: boolean;
+  readonly kind: 'network' | 'media' | 'other';
+  /** The HTTP status of the failed request, when there was a response. */
+  readonly status: number | null;
+}
+
 /** The parts of hls.js the controller uses. */
 export interface HlsPlayer<Element extends MediaElement = MediaElement> {
   loadSource(url: string): void;
   attachMedia(element: Element): void;
+  onError(listener: (failure: HlsFailure) => void): void;
+  recoverMediaError(): void;
   destroy(): void;
 }
 
@@ -65,10 +77,30 @@ interface WatchDependencies<Element extends MediaElement = MediaElement> {
 /** How often progress is saved while media plays. */
 const PROGRESS_SAVE_INTERVAL_MS = 10_000;
 
+/**
+ * Playback that gets this far past an automatic recovery has earned another one. Without the limit
+ * a session that fails right after starting would restart forever.
+ */
+const RECOVERY_RESET_SECONDS = 10;
+
 const HLS_MIME_TYPE = 'application/vnd.apple.mpegurl';
 const textSubtitleCodecs = ['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text'];
 const decodePlan = Schema.decodeUnknownSync(PlaybackPlan);
 const decodeSession = Schema.decodeUnknownSync(HlsSession);
+
+/** What the viewer sees for an unrecoverable hls.js error. */
+const hlsFailureMessages = {
+  network: 'The video could not be loaded from the server.',
+  media: 'This video could not be played in this browser.',
+  other: 'Playback failed.',
+} as const;
+
+/** What the viewer sees when the media element itself reports an error (`MediaError.code`). */
+function mediaErrorMessage(code: number | undefined) {
+  if (code === 2) return 'The connection to the server was lost.';
+  if (code === 3 || code === 4) return 'This video could not be played in this browser.';
+  return 'Playback failed.';
+}
 
 /**
  * The plan query opting out of what this browser cannot play as-is, so the server sends HLS
@@ -140,6 +172,9 @@ export class WatchController<Element extends MediaElement = MediaElement> {
   #cancelResume: (() => void) | null = null;
   #resumePlaybackAfterAttach = true;
   #changingSource = false;
+  #usingHls = false;
+  /** Where playback was when an automatic recovery ran, until playback moves well past it. */
+  #recoveredAt: number | null = null;
   #hasPlaybackStarted = false;
   #hasSavedProgress = false;
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -162,8 +197,17 @@ export class WatchController<Element extends MediaElement = MediaElement> {
   async start(video: Element) {
     this.#video = video;
     this.#listen(video, 'play', () => (this.#hasPlaybackStarted = true));
+    this.#listen(video, 'error', () => {
+      // hls.js reports its own element errors, with a way to recover.
+      if (this.#hls) return;
+      // A natively played HLS session reports a gone session or segment only as this error, with no status.
+      if (this.#usingHls && this.#recoveredAt === null) this.#restartSession(video);
+      else this.#fail(mediaErrorMessage(video.error?.code));
+    });
     this.#listen(video, 'timeupdate', () => {
-      if (this.#hasSavedProgress || video.currentTime < 1) return;
+      if (this.#recoveredAt !== null && video.currentTime > this.#recoveredAt + RECOVERY_RESET_SECONDS)
+        this.#recoveredAt = null;
+      if (this.#hasSavedProgress || this.#cancelResume || video.currentTime < 1) return;
       this.#hasSavedProgress = true;
       void this.save();
     });
@@ -222,7 +266,15 @@ export class WatchController<Element extends MediaElement = MediaElement> {
   chooseAudio(stream: number | null) {
     if (stream === this.selectedAudio) return;
     this.selectedAudio = stream;
-    void this.#loadPlan(true);
+    this.#recoveredAt = null;
+    void this.#loadPlan({ forceHls: true, keepPosition: true });
+  }
+
+  /** Starts the source over from the current position after an error. */
+  retry() {
+    if (!this.entry || !this.error) return;
+    this.#recoveredAt = null;
+    void this.#loadPlan({ forceHls: this.#usingHls, keepPosition: true });
   }
 
   /** Shows one text subtitle track, or none. */
@@ -249,6 +301,8 @@ export class WatchController<Element extends MediaElement = MediaElement> {
     const entry = this.entry;
     const { profileId } = this.#deps;
     if (!video || !profileId || !entry || this.#changingSource || !Number.isFinite(video.currentTime)) return;
+    // Until the resume seek lands the player sits at 0, which is not where the viewer stopped.
+    if (this.#cancelResume) return;
     if (!ended && !this.#hasPlaybackStarted && video.currentTime < 1) return;
     try {
       await this.#deps.data.savePlaybackProgress({
@@ -296,15 +350,62 @@ export class WatchController<Element extends MediaElement = MediaElement> {
     }
   }
 
-  /** Loads the plan and attaches its source. `forceHls` keeps the position, for audio-track changes. */
-  async #loadPlan(forceHls = false) {
+  /**
+   * Stops playback and shows `message` in place of the player. Nothing it leaves running can
+   * keep the spinner or the progress-saving pause alive.
+   */
+  #fail(message: string) {
+    this.#requests?.abort();
+    this.#cancelResume?.();
+    this.#hls?.destroy();
+    this.#hls = null;
+    this.error = message;
+    this.loading = false;
+    this.#changingSource = false;
+  }
+
+  #onHlsError(hls: HlsPlayer<Element>, failure: HlsFailure) {
+    const video = this.#video;
+    if (!failure.fatal || hls !== this.#hls || !video) return;
+    // One automatic recovery per stretch of playback; a second failure shows the error.
+    if (this.#recoveredAt === null) {
+      if (failure.kind === 'media') {
+        this.#recoveredAt = video.currentTime;
+        hls.recoverMediaError();
+        return;
+      }
+      // The server no longer has the session or segment (it expired during a long pause, or the
+      // server restarted).
+      if (failure.kind === 'network' && (failure.status === 404 || failure.status === 409)) {
+        this.#restartSession(video);
+        return;
+      }
+    }
+    this.#fail(hlsFailureMessages[failure.kind]);
+  }
+
+  /** Starts a new HLS session where playback stopped; the one automatic recovery for a gone session. */
+  #restartSession(video: Element) {
+    this.#recoveredAt = video.currentTime;
+    // `#loadPlan` reads the position before its first await, so the old player can go now. Left
+    // running, it keeps retrying the gone session, and its next error would end this recovery.
+    void this.#loadPlan({ forceHls: true, keepPosition: true });
+    this.#hls?.destroy();
+    this.#hls = null;
+  }
+
+  /**
+   * Loads the plan and attaches its source. `forceHls` plays through an HLS session whatever the
+   * plan says; `keepPosition` resumes from the current position instead of the saved progress.
+   */
+  async #loadPlan({ forceHls = false, keepPosition = false } = {}) {
     const video = this.#video;
     if (!video) return;
     this.#requests?.abort();
     const requests = new AbortController();
     this.#requests = requests;
     const { signal } = requests;
-    if (forceHls) {
+    if (keepPosition) {
       if (Number.isFinite(video.currentTime) && video.currentTime > 0)
         this.#pendingResumeMs = Math.round(video.currentTime * 1000);
       this.#resumePlaybackAfterAttach = true;
@@ -339,6 +440,8 @@ export class WatchController<Element extends MediaElement = MediaElement> {
       // A newer source or `destroy()` replaced this one; its outcome no longer matters.
       if (signal.aborted) return;
       this.error = cause instanceof PlaybackError ? cause.message : 'Playback failed';
+      this.#hls?.destroy();
+      this.#hls = null;
     } finally {
       if (this.#requests === requests) {
         this.loading = false;
@@ -351,6 +454,7 @@ export class WatchController<Element extends MediaElement = MediaElement> {
     this.#hls?.destroy();
     this.#hls = null;
     this.#cancelResume?.();
+    this.#usingHls = isHls;
     const positionMs = this.#pendingResumeMs ?? this.#saved?.positionMs ?? 0;
     // After an audio-track switch, resume from the current position even if the saved progress is watched.
     const watched = this.#pendingResumeMs === null && Boolean(this.#saved?.watched);
@@ -364,6 +468,7 @@ export class WatchController<Element extends MediaElement = MediaElement> {
         return;
       }
       this.#hls = hls;
+      hls.onError((failure) => this.#onHlsError(hls, failure));
       hls.loadSource(url);
       hls.attachMedia(video);
     } else video.src = url;

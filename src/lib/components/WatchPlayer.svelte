@@ -5,6 +5,7 @@
   import * as data from '$lib/client/zero/data';
   import { readProfileId } from '$lib/client/profile';
   import { WatchController, subtitleLabel, subtitleUrl } from '$lib/client/playback/watch-controller.svelte';
+  import { createHlsPlayer } from '$lib/client/playback/hls';
 
   let { mediaId }: { mediaId: string } = $props();
 
@@ -50,7 +51,7 @@
     // Server rendering only renders the loading state; playback starts in the browser.
     profileId: browser ? readProfileId() : '',
     fetch: (input, init) => fetch(input, init),
-    createHls: async () => new (await import('hls.js')).default(),
+    createHls: createHlsPlayer,
     navigate: (url) => goto(url),
     document: browser ? document : undefined,
   });
@@ -203,10 +204,16 @@
       >
         <strong class="text-2xl sm:text-4xl">Unable to play this video</strong><span class="max-w-xl text-zinc-400"
           >{player.error}</span
-        ><a
-          class="rounded-md bg-fern-accent-strong px-5 py-3 text-sm font-semibold text-white no-underline transition hover:bg-fern-accent-strong-hover active:scale-[.98]"
-          href={mediaFolderHref()}>Back to media folder</a
         >
+        <div class="flex flex-wrap justify-center gap-3">
+          {#if player.entry}<button
+              class="cursor-pointer rounded-md border-0 bg-fern-accent-strong px-5 py-3 text-sm font-semibold text-white transition hover:bg-fern-accent-strong-hover active:scale-[.98]"
+              onclick={() => player.retry()}>Try again</button
+            >{/if}<a
+            class="rounded-md bg-white/10 px-5 py-3 text-sm font-semibold text-white no-underline transition hover:bg-white/20 active:scale-[.98]"
+            href={mediaFolderHref()}>Back to media folder</a
+          >
+        </div>
       </div>{/if}
 
     <media-control-bar

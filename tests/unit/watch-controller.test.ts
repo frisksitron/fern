@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   WatchController,
+  type HlsFailure,
   type HlsPlayer,
   type MediaElement,
   type WatchData,
@@ -35,6 +36,7 @@ class FakeVideo extends EventTarget implements MediaElement {
   textTracks: { mode: TextTrackMode }[] = [];
   src = '';
   nativeHls = false;
+  error: { code: number } | null = null;
   seeks: number[] = [];
   listeners = 0;
   #currentTime = 0;
@@ -98,14 +100,25 @@ class FakeHls implements HlsPlayer<FakeVideo> {
   url = '';
   media: FakeVideo | null = null;
   destroyed = false;
+  recoveries = 0;
+  #errorListener: (failure: HlsFailure) => void = () => undefined;
   loadSource(url: string) {
     this.url = url;
   }
   attachMedia(element: FakeVideo) {
     this.media = element;
   }
+  onError(listener: (failure: HlsFailure) => void) {
+    this.#errorListener = listener;
+  }
+  recoverMediaError() {
+    this.recoveries++;
+  }
   destroy() {
     this.destroyed = true;
+  }
+  fail(failure: Partial<HlsFailure>) {
+    this.#errorListener({ fatal: true, kind: 'other', status: null, ...failure });
   }
 }
 
@@ -290,6 +303,136 @@ describe('WatchController', () => {
     expect(malformed.controller.error).toBe('Playback failed');
   });
 
+  describe('errors', () => {
+    /** Starts an HLS session (an audio switch) and lands its resume seek, leaving it playing at `seconds`. */
+    async function playingHls(seconds: number) {
+      const context = setup();
+      await context.controller.start(context.video);
+      context.video.playTo(seconds);
+      context.controller.chooseAudio(1);
+      await waitFor(() => context.hls.length === 1);
+      context.video.loaded(120);
+      await waitFor(() => !context.controller.loading);
+      return context;
+    }
+
+    it('ignores non-fatal hls.js errors', async () => {
+      const { controller, hls } = await playingHls(30);
+      hls[0].fail({ fatal: false, kind: 'network', status: 404 });
+      expect(controller.error).toBe('');
+      expect(hls[0].recoveries).toBe(0);
+    });
+
+    it('recovers a fatal media error once, then shows an error', async () => {
+      const { controller, hls } = await playingHls(30);
+      hls[0].fail({ kind: 'media' });
+      expect(hls[0].recoveries).toBe(1);
+      expect(controller.error).toBe('');
+
+      hls[0].fail({ kind: 'media' });
+      expect(controller).toMatchObject({ error: 'This video could not be played in this browser.', loading: false });
+      expect(hls[0].destroyed).toBe(true);
+
+      // Playback that moves on earns another recovery.
+      const next = await playingHls(30);
+      next.hls[0].fail({ kind: 'media' });
+      next.video.playTo(45);
+      next.hls[0].fail({ kind: 'media' });
+      expect(next.hls[0].recoveries).toBe(2);
+    });
+
+    it('starts a new session at the current position when the session is gone, once', async () => {
+      const { controller, hls, video, requests } = await playingHls(42);
+      video.seeks.length = 0;
+      hls[0].fail({ kind: 'network', status: 404 });
+      await waitFor(() => hls.length === 2);
+      expect(requests.filter((request) => request.url.endsWith('/session'))).toHaveLength(2);
+      video.loaded(120);
+      await waitFor(() => !controller.loading);
+      expect(video.seeks).toEqual([42]);
+      expect(controller.error).toBe('');
+      expect(hls[0].destroyed).toBe(true);
+
+      hls[1].fail({ kind: 'network', status: 409 });
+      expect(controller).toMatchObject({ error: 'The video could not be loaded from the server.', loading: false });
+      expect(requests.filter((request) => request.url.endsWith('/session'))).toHaveLength(2);
+    });
+
+    it('shows other fatal network and hls.js errors without retrying', async () => {
+      const { controller, hls } = await playingHls(30);
+      hls[0].fail({ kind: 'network', status: 500 });
+      expect(controller.error).toBe('The video could not be loaded from the server.');
+      expect(hls).toHaveLength(1);
+    });
+
+    it('shows an error when the media element fails, and retries from the current position', async () => {
+      const { controller, video, requests } = setup();
+      const started = controller.start(video);
+      await waitFor(() => video.src !== '');
+      video.loaded(120);
+      await started;
+      video.playTo(20);
+      video.error = { code: 4 };
+      video.dispatchEvent(new Event('error'));
+      expect(controller).toMatchObject({ error: 'This video could not be played in this browser.', loading: false });
+
+      video.seeks.length = 0;
+      controller.retry();
+      expect(controller.error).toBe('');
+      await waitFor(() => requests.filter((request) => request.url.endsWith('/plan')).length === 2);
+      await settle();
+      video.loaded(120);
+      await waitFor(() => !controller.loading);
+      expect(video.seeks).toEqual([20]);
+    });
+
+    it('starts a new session when a natively played HLS session fails, once', async () => {
+      const { controller, video, requests } = setup({
+        routes: {
+          [`/api/playback/${current.id}/plan`]: () =>
+            Response.json({
+              mode: 'hls',
+              sessionUrl: `/api/playback/${current.id}/session`,
+              durationMs: null,
+              audioTracks: [],
+              subtitleTracks: [],
+            }),
+        },
+      });
+      video.nativeHls = true;
+      await controller.start(video);
+      video.playTo(42);
+      video.seeks.length = 0;
+
+      video.dispatchEvent(new Event('error'));
+      expect(controller.error).toBe('');
+      await waitFor(() => requests.filter((request) => request.url.endsWith('/session')).length === 2);
+      await settle();
+      video.loaded(120);
+      await waitFor(() => !controller.loading);
+      expect(video.seeks).toEqual([42]);
+      expect(controller.error).toBe('');
+
+      video.error = { code: 4 };
+      video.dispatchEvent(new Event('error'));
+      expect(controller).toMatchObject({ error: 'This video could not be played in this browser.', loading: false });
+      expect(requests.filter((request) => request.url.endsWith('/session'))).toHaveLength(2);
+    });
+
+    it('does not leave progress saving paused after a failure while switching source', async () => {
+      const { controller, video, saves } = setup({
+        routes: { [`/api/playback/${current.id}/session`]: () => Response.json({ message: 'Busy' }, { status: 503 }) },
+      });
+      await controller.start(video);
+      video.playTo(5);
+      controller.chooseAudio(1);
+      await waitFor(() => controller.error !== '');
+      const count = saves.length;
+      video.pause();
+      expect(saves).toHaveLength(count + 1);
+    });
+  });
+
   describe('progress', () => {
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
@@ -317,6 +460,17 @@ describe('WatchController', () => {
       page.visibilityState = 'hidden';
       page.dispatchEvent(new Event('visibilitychange'));
       expect(saves).toHaveLength(count + 1);
+    });
+
+    it('does not save position 0 while the resume seek is pending, even when the viewer leaves', async () => {
+      const { controller, video, saves } = setup({ progress: { positionMs: 30_000, watched: false } });
+      const started = controller.start(video);
+      await waitFor(() => video.src !== '');
+      expect(video.paused).toBe(false);
+      video.pause();
+      controller.destroy();
+      await started;
+      expect(saves).toEqual([]);
     });
 
     it('marks the media watched when it ends or the viewer skips to the next one', async () => {
