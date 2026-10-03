@@ -13,7 +13,7 @@ export const GET: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      const scan = yield* Scans.use((scans) => scans.get(id));
+      const scan = yield* Scans.Service.use((scans) => scans.get(id));
       return yield* jsonResponse(ScanRun, scan);
     }),
     { success: (response) => response, failure: scanFailure },

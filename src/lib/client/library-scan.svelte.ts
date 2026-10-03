@@ -19,6 +19,7 @@ const decodeStatus = Schema.decodeUnknownOption(ScanStatusResponse);
 const decodeStarted = Schema.decodeUnknownOption(StartScanResponse);
 const decodeSnapshot = Schema.decodeUnknownOption(Schema.fromJsonString(ScanRun));
 const decodeEvent = Schema.decodeUnknownOption(ScanEvent);
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 const liveEventNames = ScanEvent.members.map((member) => member.fields.type.literal);
 
@@ -132,13 +133,10 @@ export class LibraryScan {
     });
     for (const type of liveEventNames) {
       events.addEventListener(type, (message) => {
-        let data: unknown;
-        try {
-          data = JSON.parse((message as MessageEvent<string>).data);
-        } catch {
-          return;
-        }
-        const event = Option.getOrNull(decodeEvent({ type, data }));
+        const event = decodeJson((message as MessageEvent<string>).data).pipe(
+          Option.flatMap((data) => decodeEvent({ type, data })),
+          Option.getOrNull,
+        );
         if (event) update(applyEvent(this.progress ?? queued, event));
       });
     }

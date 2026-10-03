@@ -1,168 +1,170 @@
 import { randomUUID } from 'node:crypto';
 import { PgClient } from '@effect/sql-pg';
+import { expect, layer } from '@effect/vitest';
 import { Effect, Layer, Redacted } from 'effect';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { SqlClient } from 'effect/sql';
 import { Database } from '../../src/lib/server/db/service';
 import { MediaRootRepository, type NewMediaRoot } from '../../src/lib/server/media-roots/repository';
 import { MediaRootId } from '../../src/lib/shared/contracts/ids';
-import { createTestDatabase, type TestDatabase } from './support/database';
-
-let database: TestDatabase;
-
-beforeAll(async () => {
-  database = await createTestDatabase();
-});
-
-afterAll(async () => {
-  await database?.drop();
-});
-
-beforeEach(async () => {
-  await database.pool.query('truncate media_roots cascade');
-});
+import { TestDatabase } from './support/database';
 
 function root(path: string): NewMediaRoot {
   return { id: MediaRootId.make(randomUUID()), path, displayName: path.split('/').at(-1) ?? path, mediaType: 'video' };
 }
 
-type DatabaseLayer = Layer.Layer<Database>;
+const reset = TestDatabase.truncate('media_roots', 'scan_runs');
 
-function repository<A, E>(
-  use: (repository: MediaRootRepository['Service']) => Effect.Effect<A, E>,
-  databaseLayer: DatabaseLayer = database.layer,
-) {
-  const layer = MediaRootRepository.layer.pipe(Layer.provide(databaseLayer));
-  return Effect.runPromise(Effect.result(Effect.provide(MediaRootRepository.use(use), layer)));
-}
-
-function insert(newRoot: NewMediaRoot, databaseLayer?: DatabaseLayer) {
-  return repository((roots) => roots.insertIfNoOverlap(newRoot), databaseLayer);
-}
-
-describe('MediaRootRepository on PostgreSQL', () => {
-  it('appends roots after the highest display order', async () => {
-    await database.pool.query(
-      `insert into media_roots (id, path, display_name, media_type, display_order) values ($1, '/existing', 'Existing', 'video', 7)`,
-      [randomUUID()],
+layer(MediaRootRepository.layer.pipe(Layer.provideMerge(TestDatabase.layer)), { excludeTestServices: true })(
+  'MediaRootRepository on PostgreSQL',
+  (it) => {
+    it.effect('appends roots after the highest display order', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* MediaRootRepository.Service;
+        yield* sql`insert into media_roots (id, path, display_name, media_type, display_order)
+          values (${randomUUID()}, '/existing', 'Existing', 'video', 7)`;
+        expect(yield* repository.insertIfNoOverlap(root('/library'))).toMatchObject({
+          path: '/library',
+          displayOrder: 8,
+        });
+        expect(yield* sql`select path, display_order from media_roots order by display_order`).toEqual([
+          { path: '/existing', display_order: 7 },
+          { path: '/library', display_order: 8 },
+        ]);
+      }),
     );
-    const result = await insert(root('/library'));
-    expect(result).toMatchObject({ _tag: 'Success', success: { path: '/library', displayOrder: 8 } });
-    const rows = await database.pool.query('select path, display_order from media_roots order by display_order');
-    expect(rows.rows).toEqual([
-      { path: '/existing', display_order: 7 },
-      { path: '/library', display_order: 8 },
-    ]);
-  });
 
-  it('rejects roots that overlap existing ones, including case variants of Windows paths', async () => {
-    const existing = await insert(root('C:\\Media\\Anime'));
-    expect(existing._tag).toBe('Success');
-    for (const path of ['C:\\Media', 'c:\\media\\anime', 'C:\\MEDIA\\Anime\\Frieren']) {
-      const result = await insert(root(path));
-      expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'MediaRootOverlap' } });
-    }
-  });
-
-  it('lets exactly one of many concurrent overlapping creations commit', async () => {
-    // Every pair in this chain overlaps (each path contains the next), so only one may win.
-    const chain = Array.from({ length: 8 }, (_, depth) => `/library${'/nested'.repeat(depth)}`);
-    const results = await Promise.all(chain.map((path) => insert(root(path))));
-    expect(results.filter((result) => result._tag === 'Success')).toHaveLength(1);
-    expect(results.filter((result) => result._tag === 'Failure')).toHaveLength(chain.length - 1);
-    for (const result of results) if (result._tag === 'Failure') expect(result.failure._tag).toBe('MediaRootOverlap');
-    expect((await database.pool.query('select count(*)::int as count from media_roots')).rows[0].count).toBe(1);
-  });
-
-  it('assigns unique display orders to concurrent non-overlapping creations', async () => {
-    const paths = Array.from({ length: 6 }, (_, index) => `/library-${index}`);
-    const results = await Promise.all(paths.map((path) => insert(root(path))));
-    expect(results.every((result) => result._tag === 'Success')).toBe(true);
-    const orders = await database.pool.query<{ display_order: number }>(
-      'select display_order from media_roots order by display_order',
+    it.effect('rejects roots that overlap existing ones, including case variants of Windows paths', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const repository = yield* MediaRootRepository.Service;
+        yield* repository.insertIfNoOverlap(root('C:\\Media\\Anime'));
+        for (const path of ['C:\\Media', 'c:\\media\\anime', 'C:\\MEDIA\\Anime\\Frieren']) {
+          expect(yield* Effect.flip(repository.insertIfNoOverlap(root(path)))).toMatchObject({
+            _tag: 'MediaRootOverlap',
+          });
+        }
+      }),
     );
-    expect(orders.rows.map((row) => row.display_order)).toEqual([0, 1, 2, 3, 4, 5]);
-  });
 
-  it('reports an unreachable database as DatabaseUnavailable', async () => {
-    const unreachable = Database.layerWithoutDependencies.pipe(
-      Layer.provide(
-        PgClient.layer({ url: Redacted.make('postgres://fern:fern@127.0.0.1:1/fern'), connectTimeout: '2 seconds' }),
-      ),
-      Layer.orDie,
+    it.effect('lets exactly one of many concurrent overlapping creations commit', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* MediaRootRepository.Service;
+        // Every pair in this chain overlaps (each path contains the next), so only one may win.
+        const chain = Array.from({ length: 8 }, (_, depth) => `/library${'/nested'.repeat(depth)}`);
+        const results = yield* Effect.forEach(
+          chain,
+          (path) => Effect.result(repository.insertIfNoOverlap(root(path))),
+          {
+            concurrency: 'unbounded',
+          },
+        );
+        expect(results.filter((result) => result._tag === 'Success')).toHaveLength(1);
+        for (const result of results)
+          if (result._tag === 'Failure') expect(result.failure._tag).toBe('MediaRootOverlap');
+        expect(yield* sql`select count(*)::int as count from media_roots`).toEqual([{ count: 1 }]);
+      }),
     );
-    const result = await insert(root('/unreachable'), unreachable);
-    expect(result).toMatchObject({ _tag: 'Failure', failure: { _tag: 'DatabaseUnavailable' } });
-  });
 
-  it('removes a root with everything indexed under it', async () => {
-    const created = root('/removable');
-    await insert(created);
-    await database.pool.query(
-      `insert into media_entries (id, media_root_id, relative_path, name, kind, mtime_ms) values ($1, $2, 'a', 'a', 'directory', 0)`,
-      [randomUUID(), created.id],
+    it.effect('assigns unique display orders to concurrent non-overlapping creations', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* MediaRootRepository.Service;
+        const paths = Array.from({ length: 6 }, (_, index) => `/library-${index}`);
+        yield* Effect.forEach(paths, (path) => repository.insertIfNoOverlap(root(path)), { concurrency: 'unbounded' });
+        const orders = yield* sql<{
+          display_order: number;
+        }>`select display_order from media_roots order by display_order`;
+        expect(orders.map((row) => row.display_order)).toEqual([0, 1, 2, 3, 4, 5]);
+      }),
     );
-    expect(await repository((roots) => roots.remove(created.id))).toMatchObject({ _tag: 'Success' });
-    expect((await database.pool.query('select id from media_entries')).rows).toEqual([]);
-    expect(await repository((roots) => roots.remove(created.id))).toMatchObject({
-      _tag: 'Failure',
-      failure: { _tag: 'MediaRootNotFound' },
-    });
-  });
 
-  it('refuses to remove a root while a scan is active', async () => {
-    const created = root('/scanning');
-    await insert(created);
-    await database.pool.query(`insert into scan_runs (id, state) values ($1, 'running')`, [randomUUID()]);
-    try {
-      expect(await repository((roots) => roots.remove(created.id))).toMatchObject({
-        _tag: 'Failure',
-        failure: { _tag: 'MediaRootBusy' },
-      });
-      expect((await database.pool.query('select id from media_roots')).rowCount).toBe(1);
-    } finally {
-      await database.pool.query('truncate scan_runs cascade');
-    }
-  });
+    it.effect('reports an unreachable database as DatabaseUnavailable', () =>
+      Effect.gen(function* () {
+        // Fresh: the block's layer already built these layers, and would be reused otherwise.
+        const unreachable = Layer.fresh(MediaRootRepository.layer).pipe(
+          Layer.provide(Layer.fresh(Database.layer)),
+          Layer.provide(
+            PgClient.layer({
+              url: Redacted.make('postgres://fern:fern@127.0.0.1:1/fern'),
+              connectTimeout: '2 seconds',
+            }),
+          ),
+          Layer.orDie,
+        );
+        const error = yield* MediaRootRepository.Service.use((repository) =>
+          repository.insertIfNoOverlap(root('/unreachable')),
+        ).pipe(Effect.provide(unreachable), Effect.flip);
+        expect(error).toMatchObject({ _tag: 'DatabaseUnavailable' });
+      }),
+    );
 
-  it('creates the YouTube library once, after the other roots, and moves it with its folder', async () => {
-    await insert(root('/media'));
-    const first = await repository((roots) => roots.ensureYouTubeRoot('/downloads'));
-    const again = await repository((roots) => roots.ensureYouTubeRoot('/downloads'));
-    expect(first._tag).toBe('Success');
-    expect(again).toEqual(first);
-    expect(
-      (
-        await database.pool.query(
-          'select path, display_name, media_type, source, display_order from media_roots where source = $1',
-          ['youtube'],
-        )
-      ).rows,
-    ).toEqual([
-      { path: '/downloads', display_name: 'YouTube', media_type: 'music', source: 'youtube', display_order: 1 },
-    ]);
+    it.effect('removes a root with everything indexed under it', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* MediaRootRepository.Service;
+        const created = root('/removable');
+        yield* repository.insertIfNoOverlap(created);
+        yield* sql`insert into media_entries (id, media_root_id, relative_path, name, kind, mtime_ms)
+          values (${randomUUID()}, ${created.id}, 'a', 'a', 'directory', 0)`;
+        yield* repository.remove(created.id);
+        expect(yield* sql`select id from media_entries`).toEqual([]);
+        expect(yield* Effect.flip(repository.remove(created.id))).toMatchObject({ _tag: 'MediaRootNotFound' });
+      }),
+    );
 
-    const moved = await repository((roots) => roots.ensureYouTubeRoot('/srv/downloads'));
-    expect(moved).toEqual(first);
-    expect((await database.pool.query('select path from media_roots where source = $1', ['youtube'])).rows).toEqual([
-      { path: '/srv/downloads' },
-    ]);
-  });
+    it.effect('refuses to remove a root while a scan is active', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* MediaRootRepository.Service;
+        const created = root('/scanning');
+        yield* repository.insertIfNoOverlap(created);
+        yield* sql`insert into scan_runs (id, state) values (${randomUUID()}, 'running')`;
+        expect(yield* Effect.flip(repository.remove(created.id))).toMatchObject({ _tag: 'MediaRootBusy' });
+        expect(yield* sql`select id from media_roots`).toHaveLength(1);
+      }),
+    );
 
-  it('keeps the YouTube library out of media folders, and refuses to remove it', async () => {
-    await insert(root('/media'));
-    expect(await repository((roots) => roots.ensureYouTubeRoot('/media/downloads'))).toMatchObject({
-      _tag: 'Failure',
-      failure: { _tag: 'MediaRootOverlap' },
-    });
-    const created = await repository((roots) => roots.ensureYouTubeRoot('/downloads'));
-    if (created._tag !== 'Success') throw new Error('The YouTube library was not created');
-    expect(await insert(root('/downloads/mixes'))).toMatchObject({
-      _tag: 'Failure',
-      failure: { _tag: 'MediaRootOverlap' },
-    });
-    expect(await repository((roots) => roots.remove(created.success))).toMatchObject({
-      _tag: 'Failure',
-      failure: { _tag: 'MediaRootManaged' },
-    });
-  });
-});
+    it.effect('creates the YouTube library once, after the other roots, and moves it with its folder', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* MediaRootRepository.Service;
+        yield* repository.insertIfNoOverlap(root('/media'));
+        const first = yield* repository.ensureYouTubeRoot('/downloads');
+        expect(yield* repository.ensureYouTubeRoot('/downloads')).toBe(first);
+        expect(
+          yield* sql`select path, display_name, media_type, source, display_order from media_roots
+            where source = 'youtube'`,
+        ).toEqual([
+          { path: '/downloads', display_name: 'YouTube', media_type: 'music', source: 'youtube', display_order: 1 },
+        ]);
+
+        expect(yield* repository.ensureYouTubeRoot('/srv/downloads')).toBe(first);
+        expect(yield* sql`select path from media_roots where source = 'youtube'`).toEqual([{ path: '/srv/downloads' }]);
+      }),
+    );
+
+    it.effect('keeps the YouTube library out of media folders, and refuses to remove it', () =>
+      Effect.gen(function* () {
+        yield* reset;
+        const repository = yield* MediaRootRepository.Service;
+        yield* repository.insertIfNoOverlap(root('/media'));
+        expect(yield* Effect.flip(repository.ensureYouTubeRoot('/media/downloads'))).toMatchObject({
+          _tag: 'MediaRootOverlap',
+        });
+        const youtube = yield* repository.ensureYouTubeRoot('/downloads');
+        expect(yield* Effect.flip(repository.insertIfNoOverlap(root('/downloads/mixes')))).toMatchObject({
+          _tag: 'MediaRootOverlap',
+        });
+        expect(yield* Effect.flip(repository.remove(youtube))).toMatchObject({ _tag: 'MediaRootManaged' });
+      }),
+    );
+  },
+);

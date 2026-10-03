@@ -15,7 +15,7 @@ export const POST: RequestHandler = ({ params, request }) =>
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
       const { audioStream } = yield* readJsonBody(request, decodeBody);
-      const session = yield* Playback.use((playback) => playback.startSession(id, audioStream ?? null));
+      const session = yield* Playback.Service.use((playback) => playback.startSession(id, audioStream ?? null));
       return yield* jsonResponse(HlsSession, session, { status: 201 });
     }),
     { success: (response) => response, failure: playbackFailure },

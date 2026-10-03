@@ -21,7 +21,7 @@ export const GET: RequestHandler = ({ params, request, url }) =>
         { id: params.id, positionMs: url.searchParams.get('positionMs') ?? '0' },
         decodeRequest,
       );
-      return yield* Thumbnails.use((thumbnails) => thumbnails.thumbnailAt(id, positionMs));
+      return yield* Thumbnails.Service.use((thumbnails) => thumbnails.thumbnailAt(id, positionMs));
     }),
     {
       success: (thumbnail) =>

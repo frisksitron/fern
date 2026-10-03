@@ -1,5 +1,5 @@
-import { Data, Duration, Effect, Schema } from 'effect';
-import { MediaProcessRunner, type ProcessError } from './process-runner';
+import { Context, Duration, Effect, Layer, Schema } from 'effect';
+import { MediaProcess, ProcessExited, ProcessOutputTooLarge, ProcessSpawnFailed, ProcessTimedOut } from './process';
 
 export type NormalizedTrack = {
   streamIndex: number;
@@ -49,10 +49,16 @@ export type ProbeResult = {
 };
 
 /** ffprobe could not read the file, or its output was not the JSON Fern expects. */
-export class ProbeFailed extends Data.TaggedError('ProbeFailed')<{
-  readonly path: string;
-  readonly cause: ProcessError | Schema.SchemaError;
-}> {}
+export class ProbeFailed extends Schema.TaggedError<ProbeFailed>()('ProbeFailed', {
+  path: Schema.String,
+  cause: Schema.Union([
+    ProcessSpawnFailed,
+    ProcessExited,
+    ProcessTimedOut,
+    ProcessOutputTooLarge,
+    Schema.instanceOf(Schema.SchemaError),
+  ]),
+}) {}
 
 // ffprobe prints some numbers as strings (bit_rate, sample_rate) and others as numbers (channels,
 // width); normalization accepts either. Unknown fields are ignored.
@@ -97,15 +103,36 @@ type FfprobeOutput = typeof FfprobeOutput.Type;
 
 const decodeFfprobeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(FfprobeOutput));
 
-function positiveInteger(value: unknown) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+/** The largest value of a PostgreSQL `integer` column. */
+const INT4_MAX = 2_147_483_647;
+
+/**
+ * A whole number that fits an `integer` column and its non-negative check, or null. ffprobe reports
+ * values outside that range (a ProRes `bit_rate` near 2.8e9, a negative track number), and one such
+ * value would fail the whole batch insert and with it every scan.
+ */
+function int4(value: unknown, minimum = 0) {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= INT4_MAX ? parsed : null;
+}
+
+const positiveInteger = (value: unknown) => int4(value, 1);
+
+/** Milliseconds as stored in a `bigint` column, or null when not a usable non-negative number. */
+function bigintMs(value: number) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 const trackKinds = new Set(['video', 'audio', 'subtitle']);
 
-const lowerCaseKeys = (tags: Readonly<Record<string, string>> | undefined) =>
-  Object.fromEntries(Object.entries(tags ?? {}).map(([key, value]) => [key.toLowerCase(), value]));
+/**
+ * Tags with lower-case keys. NUL characters are dropped: tags are free text from the file, and
+ * PostgreSQL rejects NUL in `text`, which would fail the whole batch insert.
+ */
+const lowerCaseKeys = (tags: Readonly<Record<string, string>> | undefined): Record<string, string | undefined> =>
+  Object.fromEntries(
+    Object.entries(tags ?? {}).map(([key, value]) => [key.toLowerCase(), value.replaceAll('\u0000', '')]),
+  );
 
 /**
  * Chapters in playback order, without empty ones. The last chapter often ends a little after the
@@ -121,7 +148,10 @@ function normalizeChapters(chapters: FfprobeOutput['chapters'], durationMs: numb
         title: lowerCaseKeys(chapter.tags).title?.trim() || null,
       };
     })
-    .filter((chapter) => Number.isFinite(chapter.startMs) && chapter.endMs > chapter.startMs)
+    .filter(
+      (chapter) =>
+        bigintMs(chapter.startMs) !== null && bigintMs(chapter.endMs) !== null && chapter.endMs > chapter.startMs,
+    )
     .sort((left, right) => left.startMs - right.startMs)
     .map((chapter, position) => ({ position, ...chapter }));
 }
@@ -129,13 +159,13 @@ function normalizeChapters(chapters: FfprobeOutput['chapters'], durationMs: numb
 /** Turns decoded ffprobe output into the metadata Fern stores. */
 function normalizeProbe(output: FfprobeOutput): ProbeResult {
   const tracks: NormalizedTrack[] = (output.streams ?? [])
-    .filter((stream) => trackKinds.has(stream.codec_type ?? ''))
+    .filter((stream) => trackKinds.has(stream.codec_type ?? '') && int4(stream.index) !== null)
     .map((stream) => ({
       streamIndex: stream.index,
       kind: stream.codec_type as NormalizedTrack['kind'],
       codec: stream.codec_name ?? 'unknown',
-      language: stream.tags?.language ?? null,
-      title: stream.tags?.title ?? null,
+      language: lowerCaseKeys(stream.tags).language ?? null,
+      title: lowerCaseKeys(stream.tags).title ?? null,
       isDefault: stream.disposition?.default === 1,
       isForced: stream.disposition?.forced === 1,
       channels: positiveInteger(stream.channels),
@@ -143,8 +173,8 @@ function normalizeProbe(output: FfprobeOutput): ProbeResult {
       bitrate: positiveInteger(stream.bit_rate),
       sampleRate: positiveInteger(stream.sample_rate),
       bitDepth: positiveInteger(stream.bits_per_raw_sample) ?? positiveInteger(stream.bits_per_sample),
-      width: stream.width ?? null,
-      height: stream.height ?? null,
+      width: int4(stream.width),
+      height: int4(stream.height),
     }));
   const video = tracks.find((track) => track.kind === 'video');
   const audioTracks = tracks.filter((track) => track.kind === 'audio');
@@ -159,10 +189,9 @@ function normalizeProbe(output: FfprobeOutput): ProbeResult {
     ...(audioOnly ? lowerCaseKeys(audioStream?.tags) : {}),
     ...lowerCaseKeys(output.format?.tags),
   };
-  const trackNumber = Number.parseInt(tags.track?.split('/')[0] ?? '', 10);
+  const trackNumber = int4(tags.track?.split('/')[0]);
   const duration = Number(output.format?.duration);
-  const durationMs =
-    output.format?.duration !== undefined && Number.isFinite(duration) ? Math.round(duration * 1000) : null;
+  const durationMs = output.format?.duration !== undefined ? bigintMs(Math.round(duration * 1000)) : null;
   return {
     durationMs,
     container: output.format?.format_name?.split(',')[0] ?? null,
@@ -179,25 +208,45 @@ function normalizeProbe(output: FfprobeOutput): ProbeResult {
     artist: tags.artist ?? null,
     album: tags.album ?? null,
     albumArtist: tags.album_artist ?? tags.albumartist ?? null,
-    trackNumber: Number.isFinite(trackNumber) ? trackNumber : null,
+    trackNumber,
     tracks,
     chapters: normalizeChapters(output.chapters, durationMs),
   };
 }
 
-/** Runs ffprobe on a file and decodes its JSON output. */
-export function probeMedia(file: string, timeout: Duration.Input = '30 seconds') {
-  return Effect.gen(function* () {
-    const runner = yield* MediaProcessRunner;
-    const { stdout } = yield* runner.run({
-      program: 'ffprobe',
-      args: ['-v', 'error', '-show_format', '-show_streams', '-show_chapters', '-of', 'json', file],
-      timeout,
-      maxStdoutBytes: 10_000_000,
-    });
-    return normalizeProbe(yield* decodeFfprobeJson(stdout.toString('utf8')));
-  }).pipe(
-    Effect.mapError((cause) => new ProbeFailed({ path: file, cause })),
-    Effect.withSpan('media.probe'),
-  );
+export interface Interface {
+  /** Runs ffprobe on a file and decodes its JSON output. */
+  readonly probe: (file: string, timeout?: Duration.Input) => Effect.Effect<ProbeResult, ProbeFailed>;
 }
+
+export class Service extends Context.Service<Service, Interface>()('@fern/MediaProbe') {}
+
+/** Requires `MediaProcess`. */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const media = yield* MediaProcess.Service;
+
+    const probe = Effect.fn('MediaProbe.probe')(function* (file: string, timeout: Duration.Input = '30 seconds') {
+      const output = yield* media
+        .run({
+          program: 'ffprobe',
+          args: ['-v', 'error', '-show_format', '-show_streams', '-show_chapters', '-of', 'json', file],
+          timeout,
+          maxStdoutBytes: 10_000_000,
+        })
+        .pipe(Effect.mapError((cause) => new ProbeFailed({ path: file, cause })));
+      return normalizeProbe(
+        yield* decodeFfprobeJson(output.stdout.toString('utf8')).pipe(
+          Effect.mapError((cause) => new ProbeFailed({ path: file, cause })),
+        ),
+      );
+    });
+
+    return Service.of({ probe });
+  }),
+);
+
+export const defaultLayer = layer.pipe(Layer.provide(MediaProcess.defaultLayer));
+
+export * as MediaProbe from './probe';

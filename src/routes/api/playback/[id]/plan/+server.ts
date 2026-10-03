@@ -19,7 +19,7 @@ export const GET: RequestHandler = ({ params, request, url }) =>
         aac: url.searchParams.get('aac') !== 'false',
         webm: url.searchParams.get('webm') !== 'false',
       };
-      const plan = yield* Playback.use((playback) => playback.plan(id, capabilities));
+      const plan = yield* Playback.Service.use((playback) => playback.plan(id, capabilities));
       return yield* jsonResponse(PlaybackPlan, plan);
     }),
     { success: (response) => response, failure: playbackFailure },

@@ -1,37 +1,45 @@
 import { PgClient } from '@effect/sql-pg';
 import { EffectDrizzleQueryError } from 'drizzle-orm/effect-core/errors';
-import * as PgDrizzle from 'drizzle-orm/effect-postgres';
-import { Cause, Context, Data, Effect, Layer } from 'effect';
-import { isSqlError, type SqlError, type SqlErrorReason } from 'effect/unstable/sql/SqlError';
+import { makeWithDefaults } from 'drizzle-orm/effect-postgres';
+import { Cause, Context, Effect, Layer, Schema } from 'effect';
+import { isSqlError, type SqlError, type SqlErrorReason } from 'effect/sql/SqlError';
 import { FernConfig } from '$lib/server/config';
 
 /** Drizzle over Fern's Effect PostgreSQL client. Queries and transactions are Effects. */
-export type FernDatabase = Effect.Success<ReturnType<typeof PgDrizzle.makeWithDefaults>>;
+export type Client = Effect.Success<ReturnType<typeof makeWithDefaults>>;
 
 /** A transaction on the Fern database, as passed to `db.transaction` callbacks. */
-export type FernTransaction = Parameters<Parameters<FernDatabase['transaction']>[0]>[0];
+export type Transaction = Parameters<Parameters<Client['transaction']>[0]>[0];
+
+/** The Drizzle database. */
+export class Service extends Context.Service<Service, Client>()('@fern/Database') {}
 
 /** Connections the application pool may open. Zero's mutation pool is separate (see `ZeroServer`). */
 const MAX_CONNECTIONS = 10;
 
-/** The PostgreSQL client for `DATABASE_URL`. Connections open on first use, so startup never waits on the database. */
-const PgClientLive = Layer.unwrap(
-  Effect.gen(function* () {
-    const { DATABASE_URL } = yield* FernConfig;
-    return PgClient.layer({ url: DATABASE_URL, maxConnections: MAX_CONNECTIONS, applicationName: 'fern' });
-  }),
-).pipe(Layer.orDie);
+/** Requires a `PgClient`, such as a test database's. */
+export const layer = Layer.effect(Service, makeWithDefaults());
 
-/** The Drizzle database. Provided by the application runtime, or by a test database in tests. */
-export class Database extends Context.Service<Database, FernDatabase>()('fern/Database') {
-  /** Requires a `PgClient`. */
-  static readonly layerWithoutDependencies = Layer.effect(this, PgDrizzle.makeWithDefaults());
-  /** Requires `FernConfig`. */
-  static readonly layer = this.layerWithoutDependencies.pipe(Layer.provideMerge(PgClientLive));
-}
+/**
+ * The database at `DATABASE_URL`. Connections open on first use, so startup never waits on the
+ * database.
+ */
+export const defaultLayer = layer.pipe(
+  Layer.provide(
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const config = yield* FernConfig.Service;
+        return PgClient.layer({ url: config.DATABASE_URL, maxConnections: MAX_CONNECTIONS, applicationName: 'fern' });
+      }),
+    ).pipe(Layer.orDie),
+  ),
+  Layer.provide(FernConfig.defaultLayer),
+);
 
 /** PostgreSQL cannot be reached or refused the connection. Maps to 503. */
-export class DatabaseUnavailable extends Data.TaggedError('DatabaseUnavailable')<{ readonly cause: unknown }> {}
+export class DatabaseUnavailable extends Schema.TaggedError<DatabaseUnavailable>()('DatabaseUnavailable', {
+  cause: Schema.Defect(),
+}) {}
 
 /** What a query or transaction can fail with before classification. */
 type QueryError = EffectDrizzleQueryError | SqlError;
@@ -75,12 +83,12 @@ export const orUnavailable = <A, E, R>(
     isUnavailable(sqlReason(error)) ? Effect.fail(new DatabaseUnavailable({ cause: error })) : Effect.die(error),
   ) as Effect.Effect<A, Exclude<E, QueryError> | DatabaseUnavailable, R>;
 
-/** `orUnavailable` for a statement that uses the `Database` service. */
+/**
+ * `orUnavailable` for a statement on the `Database` service, for read models (page loads and MCP
+ * tools) that are plain functions rather than services.
+ */
 export const query = <A, E>(
-  run: (db: FernDatabase) => Effect.Effect<A, E>,
-): Effect.Effect<A, Exclude<E, QueryError> | DatabaseUnavailable, Database> =>
-  orUnavailable(
-    Effect.gen(function* () {
-      return yield* run(yield* Database);
-    }),
-  );
+  run: (db: Client) => Effect.Effect<A, E>,
+): Effect.Effect<A, Exclude<E, QueryError> | DatabaseUnavailable, Service> => orUnavailable(Service.use(run));
+
+export * as Database from './service';

@@ -1,10 +1,10 @@
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { Effect } from 'effect';
 import { mediaEntries, mediaRoots } from '$lib/server/db/schema';
-import type { FernDatabase } from '$lib/server/db/service';
+import type { Database } from '$lib/server/db/service';
 
 /** The active, playable media file with this ID and its root, if any. */
-export function findActiveMedia(database: FernDatabase, id: string) {
+export function findActiveMedia(database: Database.Client, id: string) {
   return database
     .select({ entry: mediaEntries, root: mediaRoots })
     .from(mediaEntries)

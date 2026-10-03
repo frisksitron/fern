@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, inArray, isNull, or } from 'drizzle-orm';
 import { Effect } from 'effect';
 import { mediaEntries, playbackProgress } from '$lib/server/db/schema';
-import { query, type FernDatabase } from '$lib/server/db/service';
+import { query, type Database } from '$lib/server/db/service';
 import type { ContinueWatching } from '$lib/shared/browse-data';
 import type { ProfileId } from '$lib/shared/contracts/ids';
 import { CONTINUE_WATCHING_LIMIT, RESUME_MIN_MS } from '$lib/shared/playback-state';
@@ -27,7 +27,7 @@ function inFolder(folder: Folder) {
 }
 
 /** The videos in the given folders, one index range per folder (`entry_children`). */
-export function siblingsQuery(db: FernDatabase, folders: readonly Folder[]) {
+export function siblingsQuery(db: Database.Client, folders: readonly Folder[]) {
   return db
     .select(mediaEntryColumns)
     .from(mediaEntries)
@@ -39,95 +39,94 @@ export function siblingsQuery(db: FernDatabase, folders: readonly Folder[]) {
  * row's limit), recent watch history, and only the folders that history points to, loaded a batch
  * at a time until the row is full. The rest of the library is never read.
  */
-export function loadContinueWatching(profileId: ProfileId, stats: QueryStats = { queries: 0, rows: 0 }) {
-  return Effect.gen(function* () {
-    const progressWithEntry = { progress: playbackProgress, entry: mediaEntryColumns };
-    const [continuing, finished] = yield* Effect.all(
-      [
-        countRows(
-          stats,
-          query((db) =>
-            db
-              .select(progressWithEntry)
-              .from(playbackProgress)
-              .innerJoin(mediaEntries, eq(mediaEntries.id, playbackProgress.mediaEntryId))
-              .where(
-                and(
-                  eq(playbackProgress.profileId, profileId),
-                  eq(playbackProgress.watched, false),
-                  gte(playbackProgress.positionMs, RESUME_MIN_MS),
-                  liveVideo,
-                ),
-              )
-              .orderBy(desc(playbackProgress.lastPlayedAt))
-              .limit(CONTINUE_WATCHING_LIMIT),
-          ),
-        ),
-        countRows(
-          stats,
-          query((db) =>
-            db
-              .select(progressWithEntry)
-              .from(playbackProgress)
-              .innerJoin(mediaEntries, eq(mediaEntries.id, playbackProgress.mediaEntryId))
-              .where(and(eq(playbackProgress.profileId, profileId), eq(playbackProgress.watched, true), liveVideo))
-              .orderBy(desc(playbackProgress.lastPlayedAt))
-              .limit(RECENTLY_WATCHED_LIMIT),
-          ),
-        ),
-      ],
-      { concurrency: 2 },
-    );
-
-    const progress = continuing.map((row) => toProgress(row.progress));
-    const entries = continuing.map((row) => toMediaEntry(row.entry));
-    const limit = CONTINUE_WATCHING_LIMIT - progress.length;
-    if (limit <= 0 || !finished.length) return { progress, entries, upNext: [] } satisfies ContinueWatching;
-
-    const known = new Map<string, MediaEntry>();
-    const progressById = new Map<string, PlaybackProgress>();
-    for (const row of [...continuing, ...finished]) {
-      known.set(row.entry.id, toMediaEntry(row.entry));
-      progressById.set(row.progress.mediaEntryId, toProgress(row.progress));
-    }
-    const continuingIds = new Set(progress.map((item) => item.mediaEntryId));
-    const continuingFolders = new Set(entries.map(folderKey));
-
-    // Folders in the order they were last finished, as findUpNext visits them.
-    const folders = new Map<string, Folder>();
-    for (const row of finished) {
-      const key = folderKey(row.entry);
-      if (!continuingFolders.has(key) && !folders.has(key))
-        folders.set(key, { rootId: row.entry.mediaRootId, parentId: row.entry.parentId });
-    }
-
-    let upNext: MediaEntry[] = [];
-    const pending = [...folders.values()];
-    // Later folders cannot change suggestions for earlier ones, so stop as soon as the row is full.
-    while (pending.length && upNext.length < limit) {
-      const batch = pending.splice(0, CONTINUE_WATCHING_LIMIT);
-      const siblings = yield* countRows(
+export const loadContinueWatching = Effect.fn('loadContinueWatching')(function* (
+  profileId: ProfileId,
+  stats: QueryStats = { queries: 0, rows: 0 },
+) {
+  const progressWithEntry = { progress: playbackProgress, entry: mediaEntryColumns };
+  const [continuing, finished] = yield* Effect.all(
+    [
+      countRows(
         stats,
-        query((db) => siblingsQuery(db, batch)),
-      );
-      for (const row of siblings) known.set(row.id, toMediaEntry(row));
-      const unknownIds = siblings.map((row) => row.id).filter((id) => !progressById.has(id));
-      if (unknownIds.length) {
-        const rows = yield* countRows(
-          stats,
-          query((db) =>
-            db
-              .select()
-              .from(playbackProgress)
-              .where(
-                and(eq(playbackProgress.profileId, profileId), inArray(playbackProgress.mediaEntryId, unknownIds)),
+        query((db) =>
+          db
+            .select(progressWithEntry)
+            .from(playbackProgress)
+            .innerJoin(mediaEntries, eq(mediaEntries.id, playbackProgress.mediaEntryId))
+            .where(
+              and(
+                eq(playbackProgress.profileId, profileId),
+                eq(playbackProgress.watched, false),
+                gte(playbackProgress.positionMs, RESUME_MIN_MS),
+                liveVideo,
               ),
-          ),
-        );
-        for (const row of rows) progressById.set(row.mediaEntryId, toProgress(row));
-      }
-      upNext = findUpNext([...known.values()], [...progressById.values()], continuingIds, limit);
+            )
+            .orderBy(desc(playbackProgress.lastPlayedAt))
+            .limit(CONTINUE_WATCHING_LIMIT),
+        ),
+      ),
+      countRows(
+        stats,
+        query((db) =>
+          db
+            .select(progressWithEntry)
+            .from(playbackProgress)
+            .innerJoin(mediaEntries, eq(mediaEntries.id, playbackProgress.mediaEntryId))
+            .where(and(eq(playbackProgress.profileId, profileId), eq(playbackProgress.watched, true), liveVideo))
+            .orderBy(desc(playbackProgress.lastPlayedAt))
+            .limit(RECENTLY_WATCHED_LIMIT),
+        ),
+      ),
+    ],
+    { concurrency: 2 },
+  );
+
+  const progress = continuing.map((row) => toProgress(row.progress));
+  const entries = continuing.map((row) => toMediaEntry(row.entry));
+  const limit = CONTINUE_WATCHING_LIMIT - progress.length;
+  if (limit <= 0 || !finished.length) return { progress, entries, upNext: [] } satisfies ContinueWatching;
+
+  const known = new Map<string, MediaEntry>();
+  const progressById = new Map<string, PlaybackProgress>();
+  for (const row of [...continuing, ...finished]) {
+    known.set(row.entry.id, toMediaEntry(row.entry));
+    progressById.set(row.progress.mediaEntryId, toProgress(row.progress));
+  }
+  const continuingIds = new Set(progress.map((item) => item.mediaEntryId));
+  const continuingFolders = new Set(entries.map(folderKey));
+
+  // Folders in the order they were last finished, as findUpNext visits them.
+  const folders = new Map<string, Folder>();
+  for (const row of finished) {
+    const key = folderKey(row.entry);
+    if (!continuingFolders.has(key) && !folders.has(key))
+      folders.set(key, { rootId: row.entry.mediaRootId, parentId: row.entry.parentId });
+  }
+
+  let upNext: MediaEntry[] = [];
+  const pending = [...folders.values()];
+  // Later folders cannot change suggestions for earlier ones, so stop as soon as the row is full.
+  while (pending.length && upNext.length < limit) {
+    const batch = pending.splice(0, CONTINUE_WATCHING_LIMIT);
+    const siblings = yield* countRows(
+      stats,
+      query((db) => siblingsQuery(db, batch)),
+    );
+    for (const row of siblings) known.set(row.id, toMediaEntry(row));
+    const unknownIds = siblings.map((row) => row.id).filter((id) => !progressById.has(id));
+    if (unknownIds.length) {
+      const rows = yield* countRows(
+        stats,
+        query((db) =>
+          db
+            .select()
+            .from(playbackProgress)
+            .where(and(eq(playbackProgress.profileId, profileId), inArray(playbackProgress.mediaEntryId, unknownIds))),
+        ),
+      );
+      for (const row of rows) progressById.set(row.mediaEntryId, toProgress(row));
     }
-    return { progress, entries, upNext } satisfies ContinueWatching;
-  });
-}
+    upNext = findUpNext([...known.values()], [...progressById.values()], continuingIds, limit);
+  }
+  return { progress, entries, upNext } satisfies ContinueWatching;
+});

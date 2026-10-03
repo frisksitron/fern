@@ -1,14 +1,13 @@
 import path from 'node:path';
+import { describe, expect, it } from '@effect/vitest';
 import { Effect, Exit, Layer } from 'effect';
-import { describe, expect, it } from 'vitest';
-import { Database, type FernDatabase } from '../../src/lib/server/db/service';
 import { MediaLibrary } from '../../src/lib/server/media/library';
-import { fakeFileSystem } from '../support/fakes';
+import { fakeDisk, noDatabase } from '../support/fakes';
 
-const layer = MediaLibrary.layerWithoutDependencies.pipe(
+const library = MediaLibrary.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
-      fakeFileSystem({
+      fakeDisk({
         '/media/root/Movies/film.mp4': 'file',
         '/media/root/Movies/Extras': 'directory',
         '/media/root/escape.mp4': { link: '/private/secret.mp4' },
@@ -16,46 +15,48 @@ const layer = MediaLibrary.layerWithoutDependencies.pipe(
         '/private/secret.mp4': 'file',
       }),
       // fileInRoot never queries the database.
-      Layer.succeed(Database, {} as FernDatabase),
+      noDatabase,
     ),
   ),
 );
 
 const fileInRoot = (relativePath: string) =>
-  Effect.runPromiseExit(
-    Effect.provide(
-      MediaLibrary.use((library) => library.fileInRoot('/media/root', relativePath)),
-      layer,
-    ),
-  );
-
-const failure = (relativePath: string) =>
-  Effect.runPromise(
-    Effect.flip(
-      Effect.provide(
-        MediaLibrary.use((library) => library.fileInRoot('/media/root', relativePath)),
-        layer,
-      ),
-    ),
-  );
+  MediaLibrary.Service.use((media) => media.fileInRoot('/media/root', relativePath)).pipe(Effect.provide(library));
 
 describe('MediaLibrary.fileInRoot', () => {
-  it('resolves files inside the root, following links that stay inside it', async () => {
-    expect(await fileInRoot('Movies/film.mp4')).toEqual(Exit.succeed('/media/root/Movies/film.mp4'));
-    expect(await fileInRoot('inside.mp4')).toEqual(Exit.succeed('/media/root/Movies/film.mp4'));
-  });
+  it.effect('resolves files inside the root, following links that stay inside it', () =>
+    Effect.gen(function* () {
+      expect(yield* fileInRoot('Movies/film.mp4')).toBe('/media/root/Movies/film.mp4');
+      expect(yield* fileInRoot('inside.mp4')).toBe('/media/root/Movies/film.mp4');
+    }),
+  );
 
-  it('refuses links that resolve outside the root', async () => {
-    expect(await failure('escape.mp4')).toMatchObject({ _tag: 'MediaFileUnavailable', reason: 'outside-root' });
-  });
+  it.effect('refuses links that resolve outside the root', () =>
+    Effect.gen(function* () {
+      expect(yield* Effect.flip(fileInRoot('escape.mp4'))).toMatchObject({
+        _tag: 'MediaFileUnavailable',
+        reason: 'outside-root',
+      });
+    }),
+  );
 
-  it('reports missing files and directories as unavailable media files', async () => {
-    expect(await failure('Movies/gone.mp4')).toMatchObject({ _tag: 'MediaFileUnavailable', reason: 'missing' });
-    expect(await failure('Movies/Extras')).toMatchObject({ _tag: 'MediaFileUnavailable', reason: 'not-a-file' });
-  });
+  it.effect('reports missing files and directories as unavailable media files', () =>
+    Effect.gen(function* () {
+      expect(yield* Effect.flip(fileInRoot('Movies/gone.mp4'))).toMatchObject({
+        _tag: 'MediaFileUnavailable',
+        reason: 'missing',
+      });
+      expect(yield* Effect.flip(fileInRoot('Movies/Extras'))).toMatchObject({
+        _tag: 'MediaFileUnavailable',
+        reason: 'not-a-file',
+      });
+    }),
+  );
 
-  it('treats a stored path that tries to traverse upward as a defect', async () => {
-    const exit = await fileInRoot(`..${path.posix.sep}private/secret.mp4`);
-    expect(Exit.isFailure(exit) && Exit.hasDies(exit)).toBe(true);
-  });
+  it.effect('treats a stored path that tries to traverse upward as a defect', () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(fileInRoot(`..${path.posix.sep}private/secret.mp4`));
+      expect(Exit.hasDies(exit)).toBe(true);
+    }),
+  );
 });

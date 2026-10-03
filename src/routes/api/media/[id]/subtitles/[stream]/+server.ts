@@ -18,7 +18,7 @@ export const GET: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id, stream } = yield* decodeInput(params, decodeParams);
-      return yield* Playback.use((playback) => playback.embeddedSubtitle(id, stream));
+      return yield* Playback.Service.use((playback) => playback.embeddedSubtitle(id, stream));
     }),
     {
       success: (text) =>

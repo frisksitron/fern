@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { error as kitError, redirect } from '@sveltejs/kit';
-import { Cause, Data, Effect, Exit, type ManagedRuntime, Schema } from 'effect';
+import { Cause, Effect, Exit, type ManagedRuntime, Schema } from 'effect';
 import type { ApiErrorBody } from '$lib/shared/contracts/api-error';
 import { internalError, requestCancelled, serviceUnavailable, type PublicError } from './public-errors';
 import { appRuntime, type AppServices } from './runtime';
 
 /** The body was not JSON or did not match the endpoint's schema. */
-export class RequestInvalid extends Data.TaggedError('RequestInvalid')<{ readonly cause: unknown }> {}
+export class RequestInvalid extends Schema.TaggedError<RequestInvalid>()('RequestInvalid', {
+  cause: Schema.Defect(),
+}) {}
 
 /** Decodes route parameters, query values, or a parsed body, failing with `RequestInvalid`. */
 export function decodeInput<A, R>(

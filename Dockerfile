@@ -13,9 +13,10 @@ ARG YTDLP_VERSION=2026.08.19
 ARG YTDLP_SHA256=f3dec9cfeaf304cec98290fe41c6ad465d4b747d302473559643e7af24929722
 ADD --checksum=sha256:${YTDLP_SHA256} --chmod=755 \
   https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp_musllinux /usr/local/bin/yt-dlp
-# /downloads exists in the image so a named volume mounted there starts out writable by fern.
-RUN apk add --no-cache ffmpeg intel-media-driver onevpl-intel-gpu && addgroup -S fern && adduser -S fern -G fern \
-  && mkdir /downloads && chown fern:fern /downloads
+# The uid/gid are pinned to what `adduser -S` assigned before, so volumes created by earlier images keep
+# working. The cache and downloads folders exist in the image so a named volume mounted there starts out
+# writable by fern; Docker copies the folder's owner into a new volume only if the folder exists.
+RUN apk add --no-cache ffmpeg intel-media-driver onevpl-intel-gpu   && addgroup -S -g 101 fern && adduser -S -u 100 -G fern fern   && mkdir /cache /cache/hls /cache/thumbnails /cache/track-maps /downloads   && chown fern:fern /cache/hls /cache/thumbnails /cache/track-maps /downloads
 WORKDIR /app
 COPY --from=build --chown=fern:fern /app/build ./build
 COPY --from=build --chown=fern:fern /app/node_modules ./node_modules

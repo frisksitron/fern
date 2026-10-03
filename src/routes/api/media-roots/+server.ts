@@ -11,9 +11,8 @@ export const POST: RequestHandler = ({ request }) =>
   respond(
     request,
     Effect.gen(function* () {
-      const command = yield* readJsonBody(request, decodeRequest);
-      const mediaRoots = yield* MediaRoots;
-      return yield* mediaRoots.create(command);
+      const body = yield* readJsonBody(request, decodeRequest);
+      return yield* MediaRoots.Service.use((mediaRoots) => mediaRoots.create(body));
     }),
     {
       success: (root) => Response.json({ root } satisfies CreateMediaRootResponse, { status: 201 }),

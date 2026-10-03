@@ -1,3 +1,6 @@
+import path from 'node:path';
+import { Option, Schema } from 'effect';
+
 /** Prefixes of the lines Fern asks yt-dlp to print, so they stand out from anything else it prints. */
 const markers = { info: '[fern:info]', progress: '[fern:progress]', saved: '[fern:saved]' } as const;
 
@@ -14,7 +17,10 @@ export type YtDlpEvent =
 
 type DownloadOptions = {
   readonly url: string;
-  /** The YouTube library. The audio is saved as `<channel>/<title> [<video ID>].opus` with a `.jpg` cover beside it. */
+  /**
+   * The YouTube library. The audio is saved as `<channel>/<title> [<video ID>].opus` with a `.jpg`
+   * cover beside it. Names are cut to a byte length that fits every file system.
+   */
   readonly libraryPath: string;
   /** Partial files. Kept between attempts, so a retried download resumes. */
   readonly stagingPath: string;
@@ -64,12 +70,31 @@ export function ytDlpArgs(options: DownloadOptions): string[] {
     `home:${options.libraryPath}`,
     '--paths',
     `temp:${options.stagingPath}`,
+    // A name that starts with a dot would hide the file from scans, and `..` would leave the library.
+    // A name that is left empty falls back to the uploader, or to "YouTube" for the folder.
+    '--replace-in-metadata',
+    'title,channel,uploader',
+    '^[.\\s]+',
+    '',
+    // `.NB` keeps at most N bytes: ext4 allows 255 per name, and long CJK titles reach that.
     '--output',
-    '%(channel,uploader|YouTube)s/%(title)s [%(id)s].%(ext)s',
+    '%(channel,uploader|YouTube).100B/%(title).180B [%(id)s].%(ext)s',
     ...(options.ffmpegLocation ? ['--ffmpeg-location', options.ffmpegLocation] : []),
     '--',
     options.url,
   ];
+}
+
+/**
+ * The path yt-dlp saved a file to, relative to the library with `/` separators, or null when it is
+ * not a plain file below the library: outside it, or through a `.`/`..` or hidden (dot) part that
+ * scans would skip.
+ */
+export function libraryRelativePath(libraryPath: string, savedPath: string): string | null {
+  const relative = path.relative(libraryPath, path.resolve(libraryPath, savedPath));
+  if (!relative || path.isAbsolute(relative)) return null;
+  const parts = relative.split(path.sep);
+  return parts.some((part) => part.startsWith('.')) ? null : parts.join('/');
 }
 
 const count = (value: string | undefined) => {
@@ -77,7 +102,19 @@ const count = (value: string | undefined) => {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
 };
 
-const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : null);
+const text = (value: string | null | undefined) => value?.trim() || null;
+
+/** The video details `ytDlpArgs` asks yt-dlp to print as JSON. Any of them may be missing. */
+const decodeInfo = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      title: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      channel: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      uploader: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      duration: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    }),
+  ),
+);
 
 /** One line of yt-dlp's output as an event, or null for lines Fern did not ask for. */
 export function parseYtDlpLine(line: string): YtDlpEvent | null {
@@ -91,37 +128,15 @@ export function parseYtDlpLine(line: string): YtDlpEvent | null {
     const path = trimmed.slice(markers.saved.length).trim();
     return path ? { type: 'saved', path } : null;
   }
-  if (trimmed.startsWith(markers.info)) {
-    try {
-      const info = JSON.parse(trimmed.slice(markers.info.length)) as Record<string, unknown>;
-      const seconds = typeof info.duration === 'number' && info.duration >= 0 ? info.duration : null;
-      return {
-        type: 'info',
-        title: text(info.title),
-        channel: text(info.channel) ?? text(info.uploader),
-        durationMs: seconds === null ? null : Math.round(seconds * 1000),
-      };
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-/** Splits output into lines as it arrives; a line split across chunks is held until it is complete. */
-export function lineReader(onLine: (line: string) => void) {
-  const decoder = new TextDecoder();
-  let pending = '';
-  const emit = (text: string) => {
-    const lines = `${pending}${text}`.split(/\r?\n|\r/);
-    pending = lines.pop() ?? '';
-    for (const line of lines) if (line) onLine(line);
-  };
+  if (!trimmed.startsWith(markers.info)) return null;
+  const info = decodeInfo(trimmed.slice(markers.info.length));
+  if (Option.isNone(info)) return null;
+  const seconds = info.value.duration;
   return {
-    push: (chunk: Uint8Array) => emit(decoder.decode(chunk, { stream: true })),
-    end: () => {
-      emit(`${decoder.decode()}\n`);
-    },
+    type: 'info',
+    title: text(info.value.title),
+    channel: text(info.value.channel) ?? text(info.value.uploader),
+    durationMs: seconds == null || seconds < 0 ? null : Math.round(seconds * 1000),
   };
 }
 

@@ -1,4 +1,4 @@
-import { Config, ConfigProvider, Context, Effect, Layer, Redacted, Schema } from 'effect';
+import { Config, ConfigProvider, Context, Layer, Redacted, Schema } from 'effect';
 import { env } from '$env/dynamic/private';
 import { parseBrowseRoots } from './media/paths';
 
@@ -11,7 +11,7 @@ const positiveInt = (name: string, fallback: number) =>
   Config.schema(Schema.Int.check(Schema.isGreaterThan(0)), name).pipe(Config.withDefault(fallback));
 
 /** Every server setting, read from the environment. Empty values count as unset. */
-export const AppConfig = Config.all({
+export const Settings = Config.all({
   // Redacted: the URL carries the database password, so it never appears in logs.
   DATABASE_URL: Config.Redacted('DATABASE_URL').pipe(
     Config.withDefault(Redacted.make('postgres://fern:fern@localhost:5432/fern')),
@@ -52,27 +52,22 @@ export const AppConfig = Config.all({
   ),
 });
 
-export type AppConfig = Config.Success<typeof AppConfig>;
+export type Settings = Config.Success<typeof Settings>;
 
-/** The configuration decoded at startup, for Effect services. */
-export class FernConfig extends Context.Service<FernConfig, AppConfig>()('fern/Config') {}
-
-/** Parses environment-style values. Invalid settings throw an error naming the setting. */
-export function loadConfig(values: Readonly<Record<string, string | undefined>>): AppConfig {
-  try {
-    return Effect.runSync(AppConfig.parse(ConfigProvider.fromUnknown(values)));
-  } catch (cause) {
-    throw new Error(`Invalid Fern configuration: ${cause instanceof Error ? cause.message : String(cause)}`, {
-      cause,
-    });
-  }
-}
+/** The settings decoded at startup. */
+export class Service extends Context.Service<Service, Settings>()('@fern/Config') {}
 
 /**
- * The configuration from the server environment. Building the application runtime decodes it, so
- * invalid configuration stops startup with an error naming the setting.
+ * The settings from environment-style values, such as a test's. An invalid setting fails with a
+ * `ConfigError` naming it.
  */
-export const FernConfigLive = Layer.effect(
-  FernConfig,
-  Effect.sync(() => loadConfig(env)),
-);
+export const layerFrom = (values: Readonly<Record<string, string | undefined>>) =>
+  Layer.effect(Service, Settings.parse(ConfigProvider.fromUnknown(values)));
+
+/**
+ * The settings from the server environment. Building the application runtime decodes them, so an
+ * invalid setting stops startup with an error naming it.
+ */
+export const defaultLayer = Layer.suspend(() => layerFrom(env)).pipe(Layer.orDie);
+
+export * as FernConfig from './config';

@@ -17,7 +17,15 @@ test.describe('health', () => {
     expect(ready.status()).toBe(200);
     expect(await ready.json()).toEqual({
       status: 'ready',
-      checks: { database: 'ok', ffmpeg: 'ok', ffprobe: 'ok' },
+      checks: {
+        database: 'ok',
+        ffmpeg: 'ok',
+        ffprobe: 'ok',
+        hlsCache: 'ok',
+        thumbnailCache: 'ok',
+        trackMapCache: 'ok',
+        downloads: 'ok',
+      },
     });
   });
 
@@ -26,14 +34,6 @@ test.describe('health', () => {
     expect(generated.headers()['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
     const given = await request.get('/api/scans', { headers: { 'x-request-id': 'e2e-trace-1' } });
     expect(given.headers()['x-request-id']).toBe('e2e-trace-1');
-  });
-
-  test('explains the scan worker and recent scans for operators', async ({ request }) => {
-    const diagnostics = await request.get('/health/scans');
-    expect(diagnostics.status()).toBe(200);
-    const body = await diagnostics.json();
-    expect(body).toMatchObject({ workerLockHeld: true, worker: { leader: true } });
-    expect(Array.isArray(body.recentFailures)).toBe(true);
   });
 });
 

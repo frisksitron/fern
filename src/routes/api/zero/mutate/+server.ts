@@ -6,6 +6,6 @@ import type { RequestHandler } from './$types';
 export const POST: RequestHandler = ({ request }) =>
   respond(
     request,
-    ZeroServer.use((zero) => zero.mutate(request)),
+    ZeroServer.Service.use((zero) => zero.mutate(request)),
     { success: (result) => Response.json(result), failure: (error: never) => error },
   );

@@ -11,7 +11,7 @@ export const GET: RequestHandler = ({ request }) =>
   respond(
     request,
     Effect.gen(function* () {
-      const status = yield* Scans.use((scans) => scans.status);
+      const status = yield* Scans.Service.use((scans) => scans.status());
       return yield* jsonResponse(ScanStatusResponse, status);
     }),
     { success: (response) => response, failure: scanFailure },
@@ -22,8 +22,8 @@ export const POST: RequestHandler = ({ request }) =>
   respond(
     request,
     Effect.gen(function* () {
-      const { rootId } = yield* readJsonBody(request, decodeBody);
-      const scanId = yield* Scans.use((scans) => scans.start(rootId ?? null));
+      const body = yield* readJsonBody(request, decodeBody);
+      const scanId = yield* Scans.Service.use((scans) => scans.start(body.rootId ?? null));
       return yield* jsonResponse(StartScanResponse, { scanId }, { status: 202 });
     }),
     { success: (response) => response, failure: scanFailure },

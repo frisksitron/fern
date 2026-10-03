@@ -45,19 +45,36 @@ export type PlannedEntry = {
 type EntryPlan = {
   /** Every discovered entry, parents before children. */
   readonly entries: readonly PlannedEntry[];
-  /** Active rows whose files are gone. */
+  /** Active rows whose files are gone and that are not under a path that could not be read. */
   readonly removedIds: readonly string[];
 };
+
+/**
+ * Whether `relativePath` is one of `unreadable` or inside one. An unreadable directory hides
+ * everything below it, and a file that could not be examined hides only itself, so both protect
+ * their stored entries from being mistaken for deleted files.
+ */
+function isUnderUnreadable(relativePath: string, unreadable: ReadonlySet<string>) {
+  if (unreadable.size === 0) return false;
+  for (let end = relativePath.length; end > 0; end = relativePath.lastIndexOf('/', end - 1)) {
+    if (unreadable.has(relativePath.slice(0, end))) return true;
+  }
+  return false;
+}
 
 /**
  * Decides how to reconcile a root's stored entries with what traversal found. Entry IDs are stable:
  * an existing row keeps its ID. Only new, changed, or restored entries are marked for writing, and
  * media is marked for probing unless an unchanged file was already probed successfully by this version.
+ * Stored entries that were not found are removed, except those at or under `unreadablePaths`: a
+ * folder that could not be listed, such as a network share that dropped mid-scan, must not make its
+ * contents look deleted.
  */
 export function planEntries(
   mediaType: 'video' | 'music',
   items: readonly DiscoveredItem[],
   existing: readonly ExistingEntry[],
+  unreadablePaths: readonly string[] = [],
 ): EntryPlan {
   const existingByPath = new Map(existing.map((entry) => [entry.relativePath, entry]));
   const idByPath = new Map<string, string>();
@@ -91,8 +108,14 @@ export function planEntries(
     return { ...item, id, parentId, isVideo, isAudio, probeStatus, changed };
   });
   const discovered = new Set(items.map((item) => item.relativePath));
+  const unreadable = new Set(unreadablePaths);
   const removedIds = existing
-    .filter((entry) => entry.deletedAt === null && !discovered.has(entry.relativePath))
+    .filter(
+      (entry) =>
+        entry.deletedAt === null &&
+        !discovered.has(entry.relativePath) &&
+        !isUnderUnreadable(entry.relativePath, unreadable),
+    )
     .map((entry) => entry.id);
   return { entries, removedIds };
 }
@@ -157,26 +180,35 @@ export type SubtitleAssociation = {
 };
 
 /**
- * Pairs `.srt` and `.vtt` files with a video in the same folder whose file name (without extension)
- * starts the subtitle's name, such as `Movie.en.srt` with `Movie.mp4`.
+ * Pairs `.srt` and `.vtt` files with a video in the same folder. The subtitle's name without its
+ * extension must be the video's name without its extension, or that followed by `.` and a suffix
+ * such as the language or flags (`Movie.en.srt`, `Movie.en.forced.srt`). `Lecture 10.en.srt`
+ * therefore does not belong to `Lecture 1.mkv`. When several videos match, the longest name wins.
+ * Videos are indexed by folder and name, so the work grows with the number of files.
  */
 export function planSubtitles(entries: readonly PlannedEntry[]): SubtitleAssociation[] {
-  const videos = entries
-    .filter((entry) => entry.isVideo)
-    .map((entry) => ({
-      id: entry.id,
-      folder: path.posix.dirname(entry.relativePath),
-      stem: path.basename(entry.name, entry.extension ?? ''),
-    }));
+  const videosByFolder = new Map<string | null, Map<string, string>>();
+  for (const entry of entries) {
+    if (!entry.isVideo) continue;
+    let stems = videosByFolder.get(entry.parentId);
+    if (!stems) videosByFolder.set(entry.parentId, (stems = new Map()));
+    const stem = path.basename(entry.name, entry.extension ?? '');
+    if (!stems.has(stem)) stems.set(stem, entry.id);
+  }
+
   const associations: SubtitleAssociation[] = [];
   for (const entry of entries) {
     if (entry.kind !== 'file' || (entry.extension !== '.srt' && entry.extension !== '.vtt')) continue;
+    const stems = videosByFolder.get(entry.parentId);
+    if (!stems) continue;
     const base = path.basename(entry.name, entry.extension);
-    const folder = path.posix.dirname(entry.relativePath);
-    const video = videos.find((candidate) => candidate.folder === folder && base.startsWith(candidate.stem));
-    if (video)
+    // Candidate video names, longest first: the whole base name, then each cut before a dot.
+    let mediaEntryId = stems.get(base);
+    for (let dot = base.lastIndexOf('.'); mediaEntryId === undefined && dot > 0; dot = base.lastIndexOf('.', dot - 1))
+      mediaEntryId = stems.get(base.slice(0, dot));
+    if (mediaEntryId !== undefined)
       associations.push({
-        mediaEntryId: video.id,
+        mediaEntryId,
         relativePath: entry.relativePath,
         name: entry.name,
         format: entry.extension.slice(1),
@@ -184,4 +216,31 @@ export function planSubtitles(entries: readonly PlannedEntry[]): SubtitleAssocia
       });
   }
   return associations;
+}
+
+/** An active stored subtitle row. */
+export type ExistingSubtitle = {
+  readonly id: string;
+  readonly mediaEntryId: string;
+  readonly relativePath: string;
+};
+
+/**
+ * The stored subtitles to remove: those no longer paired with the same video, because the file is
+ * gone, was renamed, or its video was. Like entries, subtitles at or under `unreadablePaths` stay.
+ */
+export function planSubtitleRemovals(
+  existing: readonly ExistingSubtitle[],
+  associations: readonly SubtitleAssociation[],
+  unreadablePaths: readonly string[] = [],
+): string[] {
+  const current = new Set(associations.map((subtitle) => `${subtitle.mediaEntryId} ${subtitle.relativePath}`));
+  const unreadable = new Set(unreadablePaths);
+  return existing
+    .filter(
+      (subtitle) =>
+        !current.has(`${subtitle.mediaEntryId} ${subtitle.relativePath}`) &&
+        !isUnderUnreadable(subtitle.relativePath, unreadable),
+    )
+    .map((subtitle) => subtitle.id);
 }

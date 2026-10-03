@@ -1,18 +1,50 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Clock, Context, Effect, Layer, Option, Schema, Semaphore } from 'effect';
+import { NodeServices } from '@effect/platform-node';
+import { Clock, Context, Effect, FileSystem, Layer, Option, Schema, SynchronizedRef } from 'effect';
 import { FernConfig } from '$lib/server/config';
+import type { DatabaseUnavailable } from '$lib/server/db/service';
 import { selectEvictions } from '$lib/server/media/cache-policy';
-import { MediaFileUnavailable } from '$lib/server/media/errors';
+import { MediaFileUnavailable, type MediaFileError, type MediaNotFound } from '$lib/server/media/errors';
 import { MediaLibrary } from '$lib/server/media/library';
-import { MediaProcessRunner, type ProcessError } from '$lib/server/media/process-runner';
+import { MediaProcess, type ProcessError } from '$lib/server/media/process';
 import { makeCapacity, makeSharedWork, makeThrottled, type CapacityExceeded } from '$lib/server/media/work';
+import { Disk } from '$lib/server/platform/disk';
 import { HlsSessionId, type MediaEntryId } from '$lib/shared/contracts/ids';
-import { HlsSessionMetadata } from '$lib/shared/contracts/playback';
+import { HlsSessionMetadata, type HlsSession } from '$lib/shared/contracts/playback';
 import { HlsFileNotFound, MediaChanged, TranscodeFailed, TranscodeTimedOut } from './errors';
 
-type Accelerator = 'nvenc' | 'qsv' | 'software';
+export type Accelerator = 'nvenc' | 'qsv' | 'software';
+
+/** Validated media with a known duration, ready to stream. */
+export type SessionMedia = { readonly id: MediaEntryId; readonly path: string; readonly durationMs: number };
+
+export type HlsFileError =
+  | HlsFileNotFound
+  | MediaChanged
+  | MediaNotFound
+  | MediaFileError
+  | DatabaseUnavailable
+  | TranscodeFailed
+  | TranscodeTimedOut
+  | CapacityExceeded;
+
+/**
+ * On-demand HLS: sessions, segments, hardware encoder selection, and the segment cache. All state
+ * lives in this service, and its FFmpeg work is owned by the runtime.
+ */
+export interface Interface {
+  /** Prepares (or reuses) the HLS session for the media and audio stream. */
+  readonly startSession: (media: SessionMedia, audioStream: number | null) => Effect.Effect<HlsSession, MediaFileError>;
+  /**
+   * Resolves a manifest or segment in a session to its file, generating the segment on demand.
+   * Concurrent requests for one segment share a single FFmpeg run, which stops once no request
+   * needs it.
+   */
+  readonly hlsFile: (session: string, file: string) => Effect.Effect<string, HlsFileError>;
+}
+
+export class Service extends Context.Service<Service, Interface>()('@fern/Transcoding') {}
 
 const SEGMENT_DURATION_SECONDS = 6;
 /** Part of every session key: bump it to invalidate cached segments after changing encoding. */
@@ -23,6 +55,8 @@ const DETECTION_TIMEOUT = '20 seconds';
 const MAX_SEGMENT_WAIT = '20 seconds';
 /** Sessions served within this window are never evicted from the cache. */
 const ACTIVE_SESSION_WINDOW_MS = 10 * 60_000;
+/** How long a hardware encoder that failed is left alone before it is tried again. */
+const ACCELERATOR_RETRY_AFTER_MS = 10 * 60_000;
 /** Cache eviction walks every session directory, so it runs at most this often. */
 const CACHE_SWEEP_INTERVAL = '1 minute';
 
@@ -30,7 +64,9 @@ const sessionPattern = /^[a-f0-9]{64}$/;
 const filePattern = /^[a-zA-Z0-9._-]+$/;
 const segmentPattern = /^segment-(\d{5})\.ts$/;
 
-const decodeSessionMetadata = Schema.decodeUnknownEffect(Schema.fromJsonString(HlsSessionMetadata));
+const SessionMetadataJson = Schema.fromJsonString(HlsSessionMetadata);
+const decodeSessionMetadata = Schema.decodeUnknownEffect(SessionMetadataJson);
+const encodeSessionMetadata = Schema.encodeSync(SessionMetadataJson);
 
 function sessionKey(metadata: HlsSessionMetadata) {
   return createHash('sha256')
@@ -62,43 +98,32 @@ export function manifest(durationMs: number) {
   return lines.join('\n');
 }
 
-function videoEncoderArgs(accelerator: Accelerator, threads: number) {
+export function videoEncoderArgs(accelerator: Accelerator, threads: number) {
   if (accelerator === 'nvenc')
     return ['-vf', 'format=nv12', '-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '23', '-b:v', '0'];
   if (accelerator === 'qsv')
     return ['-vf', 'format=nv12', '-c:v', 'h264_qsv', '-preset', 'veryfast', '-global_quality', '23'];
-  return ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-threads', String(threads)];
+  // Browsers cannot decode H.264 High 10, which libx264 would produce for a 10-bit source.
+  return [
+    ...['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p', '-profile:v', 'high'],
+    ...['-threads', String(threads)],
+  ];
 }
 
-// Cache I/O failures (a full or missing disk) are not expected in normal operation: they are defects.
-const io = <A>(run: () => Promise<A>) => Effect.orDie(Effect.tryPromise({ try: run, catch: (cause) => cause }));
-const exists = (file: string) =>
-  Effect.promise(() =>
-    stat(file).then(
-      () => true,
-      () => false,
-    ),
-  );
-const removeQuietly = (file: string) => Effect.promise(() => rm(file, { recursive: true, force: true }));
-
-async function directorySize(directory: string): Promise<number> {
-  let total = 0;
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const file = path.join(directory, entry.name);
-    total += entry.isDirectory() ? await directorySize(file) : (await stat(file)).size;
-  }
-  return total;
+/** Whether a hardware encoder that failed at `failedAtMs` is still being left alone at `nowMs`. */
+export function isAcceleratorBenched(failedAtMs: number | undefined, nowMs: number) {
+  return failedAtMs !== undefined && nowMs - failedAtMs < ACCELERATOR_RETRY_AFTER_MS;
 }
 
-/**
- * On-demand HLS: sessions, segments, hardware encoder selection, and the segment cache. All state
- * lives in this service, and its FFmpeg work is owned by the runtime.
- */
-export class Transcoding extends Context.Service<Transcoding>()('fern/Transcoding', {
-  make: Effect.gen(function* () {
-    const config = yield* FernConfig;
-    const runner = yield* MediaProcessRunner;
-    const library = yield* MediaLibrary;
+/** Requires `FernConfig`, `MediaProcess`, `MediaLibrary`, `Disk`, and `FileSystem`. */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const config = yield* FernConfig.Service;
+    const media = yield* MediaProcess.Service;
+    const library = yield* MediaLibrary.Service;
+    const disk = yield* Disk.Service;
+    const fs = yield* FileSystem.FileSystem;
     const cacheDirectory = config.HLS_CACHE_DIR;
 
     const segments = yield* makeSharedWork<TranscodeFailed | TranscodeTimedOut | CapacityExceeded>();
@@ -110,35 +135,37 @@ export class Transcoding extends Context.Service<Transcoding>()('fern/Transcodin
     });
     const recentlyServed = new Map<string, number>();
 
-    // Hardware encoder selection. A hardware encoder that fails is never used again by this process.
-    const failedAccelerators = new Set<Accelerator>();
-    let selected: Accelerator | null = null;
-    const detectionLock = yield* Semaphore.make(1);
+    // Failures of the cache itself (a full or missing disk) are not expected in normal operation:
+    // they are defects. Reads that find nothing are not failures.
+    const exists = (file: string) => fs.exists(file).pipe(Effect.orElseSucceed(() => false));
+    const removeQuietly = (file: string) => fs.remove(file, { recursive: true, force: true }).pipe(Effect.ignore);
 
-    const detectAccelerator = Effect.gen(function* () {
+    /** The size and modification time of a media file, which identify its version. */
+    const versionOf = (file: string) =>
+      disk
+        .stat(file)
+        .pipe(
+          Effect.catchTag('PathNotFound', () =>
+            Effect.fail(new MediaFileUnavailable({ path: file, reason: 'missing' })),
+          ),
+        );
+
+    // Hardware encoder selection. An encoder that fails is left alone for a while, then tried again.
+    const failedAccelerators = new Map<Accelerator, number>();
+    const selected = yield* SynchronizedRef.make(Option.none<{ accelerator: Accelerator; detectedAtMs: number }>());
+
+    const detectAccelerator = Effect.fnUntraced(function* () {
       const configured = config.TRANSCODE_ACCELERATOR;
       const candidates: Accelerator[] =
         configured === 'auto' ? ['nvenc', 'qsv'] : configured === 'software' ? [] : [configured];
       for (const candidate of candidates) {
-        if (failedAccelerators.has(candidate)) continue;
+        if (isAcceleratorBenched(failedAccelerators.get(candidate), yield* Clock.currentTimeMillis)) continue;
         const probe = yield* Effect.result(
-          runner.run({
+          media.run({
             program: 'ffmpeg',
             args: [
-              '-hide_banner',
-              '-loglevel',
-              'error',
-              '-f',
-              'lavfi',
-              '-i',
-              'color=size=256x256:rate=1',
-              '-frames:v',
-              '1',
-              '-an',
-              ...videoEncoderArgs(candidate, config.TRANSCODE_THREADS),
-              '-f',
-              'null',
-              '-',
+              ...['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=size=256x256:rate=1'],
+              ...['-frames:v', '1', '-an', ...videoEncoderArgs(candidate, config.TRANSCODE_THREADS), '-f', 'null', '-'],
             ],
             timeout: DETECTION_TIMEOUT,
           }),
@@ -147,34 +174,61 @@ export class Transcoding extends Context.Service<Transcoding>()('fern/Transcodin
           yield* Effect.logInfo('Using hardware transcoding').pipe(Effect.annotateLogs({ accelerator: candidate }));
           return candidate;
         }
-        failedAccelerators.add(candidate);
+        failedAccelerators.set(candidate, yield* Clock.currentTimeMillis);
       }
       if (candidates.length) yield* Effect.logWarning('Could not initialize hardware transcoding; using software');
       return 'software' as const;
     });
 
-    const currentAccelerator = detectionLock.withPermits(1)(
-      Effect.suspend(() =>
-        selected
-          ? Effect.succeed(selected)
-          : detectAccelerator.pipe(Effect.tap((accelerator) => Effect.sync(() => (selected = accelerator)))),
-      ),
+    /**
+     * The encoder for new sessions: detected once, again after a hardware encoder failed, and again
+     * once the wait after a failure is over.
+     */
+    const currentAccelerator = SynchronizedRef.modifyEffect(selected, (current) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const retryHardware =
+          Option.isSome(current) &&
+          current.value.accelerator === 'software' &&
+          config.TRANSCODE_ACCELERATOR !== 'software' &&
+          now - current.value.detectedAtMs >= ACCELERATOR_RETRY_AFTER_MS;
+        if (Option.isSome(current) && !retryHardware) return [current.value.accelerator, current] as const;
+        const accelerator = yield* detectAccelerator();
+        return [accelerator, Option.some({ accelerator, detectedAtMs: now })] as const;
+      }),
     );
 
-    const disableAccelerator = (accelerator: Accelerator, error: ProcessError) =>
-      Effect.sync(() => {
-        failedAccelerators.add(accelerator);
-        selected = null;
-      }).pipe(
-        Effect.andThen(
-          Effect.logWarning('Hardware encoder failed; falling back to software').pipe(
-            Effect.annotateLogs({ accelerator, failure: error._tag }),
-          ),
-        ),
+    /** Blames a hardware encoder for a failure that software did not share. */
+    const disableAccelerator = Effect.fnUntraced(function* (accelerator: Accelerator, error: ProcessError) {
+      failedAccelerators.set(accelerator, yield* Clock.currentTimeMillis);
+      yield* SynchronizedRef.set(selected, Option.none());
+      yield* Effect.logWarning('Hardware encoder failed; falling back to software').pipe(
+        Effect.annotateLogs({ accelerator, failure: error._tag }),
       );
+    });
 
     const touch = (session: string) =>
-      Effect.flatMap(Clock.currentTimeMillis, (now) => Effect.sync(() => recentlyServed.set(session, now)));
+      Effect.map(Clock.currentTimeMillis, (now) => {
+        recentlyServed.set(session, now);
+      });
+
+    /** A session directory's total size and when it was last used, or nothing if it cannot be read. */
+    const sessionUsage = (key: string) => {
+      const directory = path.join(cacheDirectory, key);
+      return Effect.gen(function* () {
+        const sizes = yield* Effect.forEach(yield* fs.readDirectory(directory, { recursive: true }), (name) =>
+          fs
+            .stat(path.join(directory, name))
+            .pipe(Effect.map((info) => (info.type === 'File' ? Number(info.size) : 0))),
+        );
+        const info = yield* fs.stat(directory);
+        return {
+          key,
+          bytes: sizes.reduce((total, size) => total + size, 0),
+          lastUsedMs: Option.match(info.mtime, { onNone: () => 0, onSome: (mtime) => mtime.getTime() }),
+        };
+      }).pipe(Effect.option);
+    };
 
     /** Evicts old sessions, never touching sessions served recently or being generated. */
     const sweepCache = yield* makeThrottled(
@@ -187,22 +241,14 @@ export class Transcoding extends Context.Service<Transcoding>()('fern/Transcodin
           ...sessions.inFlightKeys(),
           ...segments.inFlightKeys().map((target) => path.basename(path.dirname(target))),
         ]);
-        const names = yield* Effect.promise(() => readdir(cacheDirectory).catch(() => [] as string[]));
-        const items = yield* Effect.forEach(
+        const names = yield* fs.readDirectory(cacheDirectory).pipe(Effect.orElseSucceed((): string[] => []));
+        const usage = yield* Effect.forEach(
           names.filter((name) => sessionPattern.test(name)),
-          (key) =>
-            Effect.promise(async () => {
-              const directory = path.join(cacheDirectory, key);
-              try {
-                return { key, bytes: await directorySize(directory), lastUsedMs: (await stat(directory)).mtimeMs };
-              } catch {
-                return null;
-              }
-            }),
+          sessionUsage,
           { concurrency: 4 },
         );
         const evictions = selectEvictions(
-          items.filter((item) => item !== null),
+          usage.flatMap((item) => (Option.isSome(item) ? [item.value] : [])),
           {
             now,
             maxAgeMs: config.HLS_CACHE_MAX_AGE_HOURS * 3_600_000,
@@ -217,43 +263,37 @@ export class Transcoding extends Context.Service<Transcoding>()('fern/Transcodin
       CACHE_SWEEP_INTERVAL,
     );
 
-    const prepareSession = (key: string, metadata: HlsSessionMetadata) =>
-      Effect.gen(function* () {
-        const directory = path.join(cacheDirectory, key);
-        const cached = yield* readSessionMetadata(directory).pipe(Effect.option);
-        if (
-          Option.isSome(cached) &&
-          sessionKey(cached.value) === key &&
-          (yield* exists(path.join(directory, 'master.m3u8')))
-        )
-          return;
-        yield* removeQuietly(directory);
-        yield* io(() => mkdir(directory, { recursive: true }));
-        yield* io(() => writeFile(path.join(directory, 'session.json'), JSON.stringify(metadata)));
-        yield* io(() => writeFile(path.join(directory, 'master.m3u8'), manifest(metadata.durationMs)));
-      });
-
     const readSessionMetadata = (directory: string) =>
-      Effect.promise(() => readFile(path.join(directory, 'session.json'), 'utf8').catch(() => '')).pipe(
-        Effect.flatMap((json) => decodeSessionMetadata(json)),
+      fs.readFileString(path.join(directory, 'session.json')).pipe(
+        Effect.orElseSucceed(() => ''),
+        Effect.flatMap(decodeSessionMetadata),
       );
 
-    /** Prepares (or reuses) the HLS session for validated media with a known duration. */
-    const startSession = (
-      media: { readonly id: MediaEntryId; readonly path: string; readonly durationMs: number },
-      audioStream: number | null,
-    ) =>
-      Effect.gen(function* () {
-        const info = yield* Effect.tryPromise({
-          try: () => stat(media.path),
-          catch: () => new MediaFileUnavailable({ path: media.path, reason: 'missing' }),
-        });
+    const prepareSession = Effect.fnUntraced(function* (key: string, metadata: HlsSessionMetadata) {
+      const directory = path.join(cacheDirectory, key);
+      const cached = yield* readSessionMetadata(directory).pipe(Effect.option);
+      if (
+        Option.isSome(cached) &&
+        sessionKey(cached.value) === key &&
+        (yield* exists(path.join(directory, 'master.m3u8')))
+      )
+        return;
+      yield* removeQuietly(directory);
+      yield* fs.makeDirectory(directory, { recursive: true });
+      yield* fs.writeFileString(path.join(directory, 'session.json'), encodeSessionMetadata(metadata));
+      yield* fs.writeFileString(path.join(directory, 'master.m3u8'), manifest(metadata.durationMs));
+    }, Effect.orDie);
+
+    const startSession = Effect.fn('Transcoding.startSession')(
+      function* (source: SessionMedia, audioStream: number | null) {
+        yield* Effect.annotateCurrentSpan({ mediaId: source.id, audioStream });
+        const version = yield* versionOf(source.path);
         const metadata: HlsSessionMetadata = {
-          mediaId: media.id,
+          mediaId: source.id,
           audioStream,
-          durationMs: media.durationMs,
-          size: info.size,
-          mtimeMs: info.mtimeMs,
+          durationMs: source.durationMs,
+          size: version.size,
+          mtimeMs: version.mtimeMs,
           accelerator: yield* currentAccelerator,
         };
         const key = sessionKey(metadata);
@@ -261,10 +301,9 @@ export class Transcoding extends Context.Service<Transcoding>()('fern/Transcodin
         yield* sessions.run(key, prepareSession(key, metadata));
         yield* sweepCache;
         return { sessionId: HlsSessionId.make(key), manifestUrl: `/hls/${key}/master.m3u8` };
-      }).pipe(
-        Effect.annotateLogs({ mediaId: media.id }),
-        Effect.withSpan('transcode.session', { attributes: { mediaId: media.id, audioStream } }),
-      );
+      },
+      (effect, source) => Effect.annotateLogs(effect, { mediaId: source.id }),
+    );
 
     const encodeSegment = (
       input: string,
@@ -274,80 +313,58 @@ export class Transcoding extends Context.Service<Transcoding>()('fern/Transcodin
       startSeconds: number,
       durationSeconds: number,
     ) =>
-      runner.run({
+      media.run({
         program: 'ffmpeg',
         args: [
-          '-y',
-          '-v',
-          'error',
-          '-ss',
-          startSeconds.toFixed(3),
-          '-i',
-          input,
-          '-t',
-          durationSeconds.toFixed(3),
-          '-map',
-          '0:v:0',
-          ...(audioStream !== null ? ['-map', `0:${audioStream}`] : ['-map', '0:a:0?']),
-          '-sn',
-          '-dn',
-          ...videoEncoderArgs(accelerator, config.TRANSCODE_THREADS),
-          '-c:a',
-          'aac',
-          '-ac',
-          '2',
-          '-avoid_negative_ts',
-          'make_zero',
-          '-muxdelay',
-          '0',
-          '-f',
-          'mpegts',
-          output,
+          ...['-y', '-v', 'error', '-ss', startSeconds.toFixed(3), '-i', input, '-t', durationSeconds.toFixed(3)],
+          ...['-map', '0:v:0', ...(audioStream !== null ? ['-map', `0:${audioStream}`] : ['-map', '0:a:0?'])],
+          ...['-sn', '-dn', ...videoEncoderArgs(accelerator, config.TRANSCODE_THREADS)],
+          ...['-c:a', 'aac', '-ac', '2', '-avoid_negative_ts', 'make_zero', '-muxdelay', '0', '-f', 'mpegts', output],
         ],
         timeout: SEGMENT_TIMEOUT,
       });
 
     /** Encodes one segment to a temporary file and renames it into place, removing the temporary file on any exit. */
-    const generateSegment = (
+    const generateSegment = Effect.fn('Transcoding.generateSegment')(function* (
       input: string,
       target: string,
       metadata: HlsSessionMetadata,
       startSeconds: number,
       durationSeconds: number,
-    ): Effect.Effect<void, TranscodeFailed | TranscodeTimedOut> => {
+    ) {
+      yield* Effect.annotateCurrentSpan({ mediaId: metadata.mediaId, startSeconds });
       const temporary = `${target}.${randomUUID()}.tmp.ts`;
-      return Effect.gen(function* () {
-        const preferred = failedAccelerators.has(metadata.accelerator) ? 'software' : metadata.accelerator;
-        yield* encodeSegment(input, temporary, metadata.audioStream, preferred, startSeconds, durationSeconds).pipe(
-          Effect.catch((error) =>
-            preferred === 'software' || error._tag === 'ProcessSpawnFailed'
-              ? Effect.fail(error)
-              : disableAccelerator(preferred, error).pipe(
-                  Effect.andThen(removeQuietly(temporary)),
-                  Effect.andThen(
-                    encodeSegment(input, temporary, metadata.audioStream, 'software', startSeconds, durationSeconds),
-                  ),
-                ),
-          ),
-          Effect.mapError((error) =>
-            error._tag === 'ProcessTimedOut'
-              ? new TranscodeTimedOut({ timeoutMs: error.timeoutMs })
-              : new TranscodeFailed({ cause: error }),
-          ),
-        );
-        yield* io(() => rename(temporary, target));
-      }).pipe(
+      const preferred = isAcceleratorBenched(
+        failedAccelerators.get(metadata.accelerator),
+        yield* Clock.currentTimeMillis,
+      )
+        ? 'software'
+        : metadata.accelerator;
+      const encode = (accelerator: Accelerator) =>
+        encodeSegment(input, temporary, metadata.audioStream, accelerator, startSeconds, durationSeconds);
+      yield* encode(preferred).pipe(
+        // Only an encoder that exited with an error and whose segment software then encodes is
+        // to blame. A timeout, a bad input, or a missing stream would fail software too.
+        Effect.catch((error) =>
+          preferred === 'software' || error._tag !== 'ProcessExited'
+            ? Effect.fail(error)
+            : removeQuietly(temporary).pipe(
+                Effect.andThen(encode('software')),
+                Effect.tap(() => disableAccelerator(preferred, error)),
+              ),
+        ),
+        Effect.mapError((error) =>
+          error._tag === 'ProcessTimedOut'
+            ? new TranscodeTimedOut({ timeoutMs: error.timeoutMs })
+            : new TranscodeFailed({ cause: error }),
+        ),
+        Effect.andThen(fs.rename(temporary, target).pipe(Effect.orDie)),
         Effect.ensuring(removeQuietly(temporary)),
-        Effect.withSpan('transcode.segment', { attributes: { mediaId: metadata.mediaId, startSeconds } }),
       );
-    };
+    });
 
-    /**
-     * Resolves a manifest or segment in a session, generating the segment on demand. Concurrent
-     * requests for one segment share a single FFmpeg run, which stops once no request needs it.
-     */
-    const hlsFile = (session: string, file: string) =>
-      Effect.gen(function* () {
+    const hlsFile = Effect.fn('Transcoding.hlsFile')(
+      function* (session: string, file: string) {
         if (!sessionPattern.test(session) || !filePattern.test(file))
           return yield* new HlsFileNotFound({ session, file });
         const directory = path.join(cacheDirectory, session);
@@ -368,36 +385,35 @@ export class Transcoding extends Context.Service<Transcoding>()('fern/Transcodin
         const startSeconds = Number(match[1]) * SEGMENT_DURATION_SECONDS;
         if (startSeconds * 1000 >= metadata.durationMs) return yield* new HlsFileNotFound({ session, file });
 
-        const media = yield* library.activeMedia(metadata.mediaId);
-        const info = yield* Effect.tryPromise({
-          try: () => stat(media.path),
-          catch: () => new MediaFileUnavailable({ path: media.path, reason: 'missing' }),
-        });
-        if (info.size !== metadata.size || info.mtimeMs !== metadata.mtimeMs)
+        const source = yield* library.activeMedia(metadata.mediaId);
+        const version = yield* versionOf(source.path);
+        if (version.size !== metadata.size || version.mtimeMs !== metadata.mtimeMs)
           return yield* new MediaChanged({ mediaId: metadata.mediaId });
 
         const durationSeconds = Math.min(SEGMENT_DURATION_SECONDS, metadata.durationMs / 1000 - startSeconds);
         yield* segments.run(
           target,
           capacity.withCapacity(
-            Effect.suspend(() => exists(target)).pipe(
-              Effect.flatMap((done) =>
-                done ? Effect.void : generateSegment(media.path, target, metadata, startSeconds, durationSeconds),
-              ),
+            Effect.flatMap(exists(target), (done) =>
+              done ? Effect.void : generateSegment(source.path, target, metadata, startSeconds, durationSeconds),
             ),
           ),
         );
         return target;
-      }).pipe(Effect.annotateLogs({ sessionId: session, file }));
+      },
+      (effect, session, file) => Effect.annotateLogs(effect, { sessionId: session, file }),
+    );
 
-    return { startSession, hlsFile } as const;
+    return Service.of({ startSession, hlsFile });
   }),
-}) {
-  /** Requires `FernConfig`, `MediaProcessRunner`, and `MediaLibrary`. */
-  static readonly layerWithoutDependencies = Layer.effect(this, this.make);
-  /** Requires `Database` and `FernConfig`. */
-  static readonly layer = this.layerWithoutDependencies.pipe(
-    Layer.provide(MediaLibrary.layer),
-    Layer.provide(MediaProcessRunner.layer),
-  );
-}
+);
+
+export const defaultLayer = layer.pipe(
+  Layer.provide(MediaLibrary.defaultLayer),
+  Layer.provide(MediaProcess.defaultLayer),
+  Layer.provide(Disk.layer),
+  Layer.provide(NodeServices.layer),
+  Layer.provide(FernConfig.defaultLayer),
+);
+
+export * as Transcoding from './service';

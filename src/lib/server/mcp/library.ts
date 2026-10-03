@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import { Data, Effect } from 'effect';
+import { Effect, Schema } from 'effect';
 import { mediaEntries, mediaRoots, playbackProgress, profiles } from '$lib/server/db/schema';
 import { query } from '$lib/server/db/service';
 import { ProfileNotFound } from '$lib/server/library/errors';
@@ -8,7 +8,9 @@ import { sortEntries } from '$lib/shared/sorting';
 
 type LibraryEntryKind = 'file' | 'directory';
 
-export class DirectoryNotFound extends Data.TaggedError('DirectoryNotFound')<{ readonly id: string }> {}
+export class DirectoryNotFound extends Schema.TaggedError<DirectoryNotFound>()('DirectoryNotFound', {
+  id: Schema.String,
+}) {}
 
 /** A library path as names from the root down, such as `['Music', 'Artist', 'Album', 'Song.flac']`. */
 export function breadcrumb(rootName: string, relativePath: string): string[] {
@@ -16,9 +18,13 @@ export function breadcrumb(rootName: string, relativePath: string): string[] {
 }
 
 /** Videos and folders whose library path contains every word of `text`. */
-export function searchLibrary(text: string, kind: LibraryEntryKind | undefined, limit: number) {
+export const searchLibrary = Effect.fn('searchLibrary')(function* (
+  text: string,
+  kind: LibraryEntryKind | undefined,
+  limit: number,
+) {
   const tokens = text.trim().toLocaleLowerCase().split(/\s+/);
-  return query((db) =>
+  const rows = yield* query((db) =>
     db
       .select({
         id: mediaEntries.id,
@@ -41,20 +47,19 @@ export function searchLibrary(text: string, kind: LibraryEntryKind | undefined, 
       )
       .orderBy(asc(mediaEntries.kind), asc(mediaEntries.relativePath))
       .limit(limit),
-  ).pipe(
-    Effect.map((rows) => ({
-      results: rows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        kind: row.kind as LibraryEntryKind,
-        mediaRootId: row.mediaRootId,
-        rootName: row.rootName,
-        breadcrumb: breadcrumb(row.rootName, row.relativePath),
-        durationMs: row.durationMs,
-      })),
-    })),
   );
-}
+  return {
+    results: rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      kind: row.kind as LibraryEntryKind,
+      mediaRootId: row.mediaRootId,
+      rootName: row.rootName,
+      breadcrumb: breadcrumb(row.rootName, row.relativePath),
+      durationMs: row.durationMs,
+    })),
+  };
+});
 
 /**
  * The videos below a directory, at any depth. The recursive query walks `parent_id` down from the
@@ -73,117 +78,119 @@ export function subtreeVideosQuery(directoryId: string) {
     select id from tree where kind = 'file' and is_video`;
 }
 
-export function getDirectoryProgress(profileId: string, directoryId: string, recursive: boolean) {
-  return Effect.gen(function* () {
-    const [[profile], [directory]] = yield* Effect.all(
-      [
-        query((db) =>
-          db.select({ id: profiles.id, name: profiles.name }).from(profiles).where(eq(profiles.id, profileId)).limit(1),
-        ),
-        query((db) =>
+export const getDirectoryProgress = Effect.fn('getDirectoryProgress')(function* (
+  profileId: string,
+  directoryId: string,
+  recursive: boolean,
+) {
+  const [[profile], [directory]] = yield* Effect.all(
+    [
+      query((db) =>
+        db.select({ id: profiles.id, name: profiles.name }).from(profiles).where(eq(profiles.id, profileId)).limit(1),
+      ),
+      query((db) =>
+        db
+          .select({
+            id: mediaEntries.id,
+            name: mediaEntries.name,
+            mediaRootId: mediaEntries.mediaRootId,
+            rootName: mediaRoots.displayName,
+            relativePath: mediaEntries.relativePath,
+          })
+          .from(mediaEntries)
+          .innerJoin(mediaRoots, eq(mediaRoots.id, mediaEntries.mediaRootId))
+          .where(
+            and(eq(mediaEntries.id, directoryId), eq(mediaEntries.kind, 'directory'), isNull(mediaEntries.deletedAt)),
+          )
+          .limit(1),
+      ),
+    ],
+    { concurrency: 2 },
+  );
+
+  if (!profile) return yield* new ProfileNotFound({ id: profileId });
+  if (!directory) return yield* new DirectoryNotFound({ id: directoryId });
+
+  const videoIds = recursive
+    ? (yield* query((db) => db.execute<{ id: string }>(subtreeVideosQuery(directory.id), 'objects'))).map(
+        (row) => row.id,
+      )
+    : null;
+  const rows =
+    videoIds?.length === 0
+      ? []
+      : yield* query((db) =>
           db
             .select({
               id: mediaEntries.id,
               name: mediaEntries.name,
-              mediaRootId: mediaEntries.mediaRootId,
-              rootName: mediaRoots.displayName,
               relativePath: mediaEntries.relativePath,
+              sortOrder: mediaEntries.sortOrder,
+              durationMs: mediaEntries.durationMs,
+              positionMs: playbackProgress.positionMs,
+              progressDurationMs: playbackProgress.durationMs,
+              watched: playbackProgress.watched,
             })
             .from(mediaEntries)
-            .innerJoin(mediaRoots, eq(mediaRoots.id, mediaEntries.mediaRootId))
-            .where(
-              and(eq(mediaEntries.id, directoryId), eq(mediaEntries.kind, 'directory'), isNull(mediaEntries.deletedAt)),
+            .leftJoin(
+              playbackProgress,
+              and(eq(playbackProgress.mediaEntryId, mediaEntries.id), eq(playbackProgress.profileId, profileId)),
             )
-            .limit(1),
-        ),
-      ],
-      { concurrency: 2 },
-    );
+            .where(
+              videoIds
+                ? inArray(mediaEntries.id, videoIds)
+                : and(
+                    eq(mediaEntries.parentId, directory.id),
+                    eq(mediaEntries.kind, 'file'),
+                    eq(mediaEntries.isVideo, true),
+                    isNull(mediaEntries.deletedAt),
+                  ),
+            ),
+        );
 
-    if (!profile) return yield* new ProfileNotFound({ id: profileId });
-    if (!directory) return yield* new DirectoryNotFound({ id: directoryId });
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  const ordered = recursive
+    ? [...rows].sort(
+        (left, right) => collator.compare(left.relativePath, right.relativePath) || left.id.localeCompare(right.id),
+      )
+    : sortEntries(rows.map((row) => ({ ...row, kind: 'file' })));
+  const watchedVideos = ordered.filter((row) => row.watched === true);
+  const inProgressVideos = ordered.filter((row) =>
+    hasResumableProgress({ positionMs: row.positionMs ?? 0, watched: row.watched }),
+  );
+  const remainingVideos = ordered.filter((row) => row.watched !== true);
+  const knownDurations = ordered.filter((row) => (row.progressDurationMs ?? row.durationMs) != null);
+  const remainingDurationMs = remainingVideos.reduce((total, row) => {
+    const durationMs = row.progressDurationMs ?? row.durationMs;
+    return durationMs == null ? total : total + Math.max(0, durationMs - (row.positionMs ?? 0));
+  }, 0);
+  const next = remainingVideos[0];
 
-    const videoIds = recursive
-      ? (yield* query((db) => db.execute<{ id: string }>(subtreeVideosQuery(directory.id), 'objects'))).map(
-          (row) => row.id,
-        )
-      : null;
-    const rows =
-      videoIds?.length === 0
-        ? []
-        : yield* query((db) =>
-            db
-              .select({
-                id: mediaEntries.id,
-                name: mediaEntries.name,
-                relativePath: mediaEntries.relativePath,
-                sortOrder: mediaEntries.sortOrder,
-                durationMs: mediaEntries.durationMs,
-                positionMs: playbackProgress.positionMs,
-                progressDurationMs: playbackProgress.durationMs,
-                watched: playbackProgress.watched,
-              })
-              .from(mediaEntries)
-              .leftJoin(
-                playbackProgress,
-                and(eq(playbackProgress.mediaEntryId, mediaEntries.id), eq(playbackProgress.profileId, profileId)),
-              )
-              .where(
-                videoIds
-                  ? inArray(mediaEntries.id, videoIds)
-                  : and(
-                      eq(mediaEntries.parentId, directory.id),
-                      eq(mediaEntries.kind, 'file'),
-                      eq(mediaEntries.isVideo, true),
-                      isNull(mediaEntries.deletedAt),
-                    ),
-              ),
-          );
-
-    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-    const ordered = recursive
-      ? [...rows].sort(
-          (left, right) => collator.compare(left.relativePath, right.relativePath) || left.id.localeCompare(right.id),
-        )
-      : sortEntries(rows.map((row) => ({ ...row, kind: 'file' })));
-    const watchedVideos = ordered.filter((row) => row.watched === true);
-    const inProgressVideos = ordered.filter((row) =>
-      hasResumableProgress({ positionMs: row.positionMs ?? 0, watched: row.watched }),
-    );
-    const remainingVideos = ordered.filter((row) => row.watched !== true);
-    const knownDurations = ordered.filter((row) => (row.progressDurationMs ?? row.durationMs) != null);
-    const remainingDurationMs = remainingVideos.reduce((total, row) => {
-      const durationMs = row.progressDurationMs ?? row.durationMs;
-      return durationMs == null ? total : total + Math.max(0, durationMs - (row.positionMs ?? 0));
-    }, 0);
-    const next = remainingVideos[0];
-
-    return {
-      profile,
-      directory: {
-        id: directory.id,
-        name: directory.name,
-        mediaRootId: directory.mediaRootId,
-        rootName: directory.rootName,
-        breadcrumb: breadcrumb(directory.rootName, directory.relativePath),
-      },
-      recursive,
-      totalVideos: ordered.length,
-      watchedVideos: watchedVideos.length,
-      inProgressVideos: inProgressVideos.length,
-      unstartedVideos: remainingVideos.length - inProgressVideos.length,
-      remainingVideos: remainingVideos.length,
-      durationKnownVideos: knownDurations.length,
-      remainingDurationMs,
-      nextVideo: next
-        ? {
-            id: next.id,
-            name: next.name,
-            breadcrumb: breadcrumb(directory.rootName, next.relativePath),
-            durationMs: next.progressDurationMs ?? next.durationMs,
-            positionMs: next.positionMs ?? 0,
-          }
-        : null,
-    };
-  });
-}
+  return {
+    profile,
+    directory: {
+      id: directory.id,
+      name: directory.name,
+      mediaRootId: directory.mediaRootId,
+      rootName: directory.rootName,
+      breadcrumb: breadcrumb(directory.rootName, directory.relativePath),
+    },
+    recursive,
+    totalVideos: ordered.length,
+    watchedVideos: watchedVideos.length,
+    inProgressVideos: inProgressVideos.length,
+    unstartedVideos: remainingVideos.length - inProgressVideos.length,
+    remainingVideos: remainingVideos.length,
+    durationKnownVideos: knownDurations.length,
+    remainingDurationMs,
+    nextVideo: next
+      ? {
+          id: next.id,
+          name: next.name,
+          breadcrumb: breadcrumb(directory.rootName, next.relativePath),
+          durationMs: next.progressDurationMs ?? next.durationMs,
+          positionMs: next.positionMs ?? 0,
+        }
+      : null,
+  };
+});

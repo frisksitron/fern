@@ -40,7 +40,28 @@ describe('dependency boundaries', () => {
     expect(dataLayer).toEqual(['src/lib/server/http.ts']);
   });
 
-  it('spawn FFmpeg and ffprobe only through the media process runner', async () => {
-    expect(await importersOf(/from ['"](node:)?child_process['"]/)).toEqual(['src/lib/server/media/process-runner.ts']);
+  it('spawn FFmpeg, ffprobe, and yt-dlp only through MediaProcess', async () => {
+    expect(await importersOf(/from ['"]((node:)?child_process|effect\/process)['"]/)).toEqual([
+      'src/lib/server/media/process.ts',
+    ]);
+  });
+
+  it('keep Effect in the browser to Schema and Option', async () => {
+    const client = /^src\/(lib\/(client|components|music|zero|shared)\/|routes\/.*\.svelte$)/;
+    const offending: string[] = [];
+    for (const file of (await sourceFiles('src')).map((file) => file.split(path.sep).join('/'))) {
+      if (!client.test(file)) continue;
+      for (const match of (await readFile(file, 'utf8')).matchAll(
+        /import\s+(type\s+)?\{([^}]*)\}\s+from\s+'(effect[^']*)'/g,
+      )) {
+        const names = match[2]
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean);
+        if (match[3] !== 'effect' || names.some((name) => name !== 'Schema' && name !== 'Option'))
+          offending.push(`${file}: ${match[0]}`);
+      }
+    }
+    expect(offending).toEqual([]);
   });
 });

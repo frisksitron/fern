@@ -1,12 +1,17 @@
-import { Schema } from 'effect';
-import { readApiError } from '$lib/shared/contracts/api-error';
+import { Option, Schema } from 'effect';
+import { requestJson } from '$lib/client/api';
 import { FolderTracksResponse } from '$lib/shared/contracts/music';
 
 const trackIdsType = 'application/x-fern-track-ids';
 const folderType = 'application/x-fern-music-folder';
 const playlistNameType = 'application/x-fern-playlist-name';
 
-type DraggedFolder = { readonly rootId: string; readonly folderId: string | null };
+const DraggedFolder = Schema.Struct({ rootId: Schema.String, folderId: Schema.NullOr(Schema.String) });
+type DraggedFolder = typeof DraggedFolder.Type;
+
+// Drag data can come from another tab or an older Fern, so it is decoded rather than trusted.
+const decodeTrackIds = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)));
+const decodeDraggedFolder = Schema.decodeUnknownOption(Schema.fromJsonString(DraggedFolder));
 
 function writeCommon(transfer: DataTransfer, label: string, summary: string) {
   transfer.effectAllowed = 'copy';
@@ -26,33 +31,24 @@ export function writeFolderDrag(transfer: DataTransfer, folder: DraggedFolder, l
 }
 
 function readTrackIds(transfer: DataTransfer | null) {
-  try {
-    const parsed: unknown = JSON.parse(transfer?.getData(trackIdsType) || '[]');
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((id): id is string => typeof id === 'string');
-  } catch {
-    return [];
-  }
+  return Option.getOrElse(decodeTrackIds(transfer?.getData(trackIdsType)), () => []);
 }
 
-function readDraggedFolder(transfer: DataTransfer | null): DraggedFolder | null {
-  try {
-    const parsed = JSON.parse(transfer?.getData(folderType) || 'null') as Partial<DraggedFolder> | null;
-    if (typeof parsed?.rootId !== 'string') return null;
-    return { rootId: parsed.rootId, folderId: typeof parsed.folderId === 'string' ? parsed.folderId : null };
-  } catch {
-    return null;
-  }
+function readDraggedFolder(transfer: DataTransfer | null) {
+  return Option.getOrNull(decodeDraggedFolder(transfer?.getData(folderType)));
 }
 
 /** The tracks in a dragged folder and its subfolders, from the server. */
 async function fetchFolderTrackIds(folder: DraggedFolder): Promise<string[]> {
   const params = new URLSearchParams({ root: folder.rootId });
   if (folder.folderId) params.set('folder', folder.folderId);
-  const response = await fetch(`/api/music/tracks?${params}`);
-  const body: unknown = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(readApiError(body)?.message ?? 'Could not read that folder.');
-  return [...Schema.decodeUnknownSync(FolderTracksResponse)(body).ids];
+  const tracks = await requestJson(
+    `/api/music/tracks?${params}`,
+    {},
+    FolderTracksResponse,
+    'Could not read that folder.',
+  );
+  return [...tracks.ids];
 }
 
 /** The dragged track IDs, looking up a dragged folder's tracks. */

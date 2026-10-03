@@ -12,7 +12,7 @@ export const FolderTracksQuery = Schema.Struct({
 
 /** The folder's tracks, including those in nested folders, in album order. */
 export const FolderTracksResponse = Schema.Struct({ ids: Schema.Array(MediaEntryId) });
-export type FolderTracksResponse = typeof FolderTracksResponse.Type;
+export interface FolderTracksResponse extends Schema.Schema.Type<typeof FolderTracksResponse> {}
 
 /** The longest playlist name, after trimming (the `playlist_name_length` check agrees). */
 export const PLAYLIST_NAME_MAX_LENGTH = 80;

@@ -1,107 +1,80 @@
-import { randomUUID } from 'node:crypto';
-import { Effect, Layer, ManagedRuntime } from 'effect';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { Database } from '../../src/lib/server/db/service';
-import { MediaProcessRunner, ProcessSpawnFailed, type ProcessRequest } from '../../src/lib/server/media/process-runner';
+import { NodeServices } from '@effect/platform-node';
+import { expect, layer } from '@effect/vitest';
+import { Effect, FileSystem, Layer } from 'effect';
+import { MediaProcess, ProcessSpawnFailed } from '../../src/lib/server/media/process';
 import { Health } from '../../src/lib/server/operations/health';
-import { ScanWorker } from '../../src/lib/server/scans/worker';
-import { createTestDatabase, type TestDatabase } from './support/database';
+import { testConfig } from '../support/config';
+import { TestDatabase } from './support/database';
 
-let database: TestDatabase;
-let runtime: ManagedRuntime.ManagedRuntime<Health, never> | undefined;
+const allOk = {
+  database: 'ok',
+  ffmpeg: 'ok',
+  ffprobe: 'ok',
+  hlsCache: 'ok',
+  thumbnailCache: 'ok',
+  trackMapCache: 'ok',
+  downloads: 'ok',
+} as const;
 
-beforeAll(async () => {
-  database = await createTestDatabase();
-});
-
-afterAll(async () => {
-  await database?.drop();
-});
-
-beforeEach(async () => {
-  await database.pool.query('truncate scan_runs cascade');
-});
-
-afterEach(async () => {
-  await runtime?.dispose();
-  runtime = undefined;
-});
-
-/** Health with a fake process runner where `missing` programs are not installed. */
-function health(missing: readonly string[] = [], leader = false) {
-  const runner = Layer.succeed(MediaProcessRunner, {
-    run: (request: ProcessRequest) =>
+/**
+ * Health on the test database, with a fake process runner where `missing` programs are not installed
+ * and the cache and downloads folders in a temporary directory (`absent` ones are not created).
+ */
+function health(options: { missing?: readonly string[]; absent?: readonly string[] } = {}) {
+  const { missing = [], absent = [] } = options;
+  const media = Layer.mock(MediaProcess.Service, {
+    run: (request) =>
       missing.includes(request.program)
         ? Effect.fail(new ProcessSpawnFailed({ program: request.program, cause: new Error('ENOENT') }))
         : Effect.succeed({ stdout: Buffer.alloc(0), stderr: '', durationMs: 1 }),
   });
-  const worker = Layer.succeed(ScanWorker, {
-    wake: Effect.void,
-    status: Effect.succeed({ workerId: 'test-worker', leader, currentScanId: null }),
-  });
-  runtime = ManagedRuntime.make(
-    Health.layerWithoutDependencies.pipe(Layer.provide(Layer.mergeAll(database.layer, runner, worker))),
+  const config = Layer.unwrap(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: 'fern-health-' });
+      const folders = {
+        HLS_CACHE_DIR: `${root}/hls`,
+        THUMBNAIL_CACHE_DIR: `${root}/thumbnails`,
+        TRACK_MAP_CACHE_DIR: `${root}/track-maps`,
+        DOWNLOADS_DIR: `${root}/downloads`,
+      };
+      for (const [name, directory] of Object.entries(folders)) {
+        if (!absent.includes(name)) yield* fs.makeDirectory(directory);
+      }
+      return testConfig(folders);
+    }),
+  ).pipe(Layer.provide(NodeServices.layer));
+  // Fresh: each test gets its own Health with its own fakes, not the block's memoized one.
+  return Effect.provide(
+    Layer.fresh(Health.layer).pipe(Layer.provide(Layer.mergeAll(media, config, NodeServices.layer))),
   );
-  return <A, E>(use: (service: Health['Service']) => Effect.Effect<A, E>) => runtime!.runPromise(Health.use(use));
 }
 
-describe('Health', () => {
-  it('is ready when the database answers and FFmpeg and ffprobe run', async () => {
-    const run = health();
-    expect(await run((service) => service.readiness)).toEqual({
-      status: 'ready',
-      checks: { database: 'ok', ffmpeg: 'ok', ffprobe: 'ok' },
-    });
-  });
+layer(TestDatabase.layer, { excludeTestServices: true })('Health', (it) => {
+  it.effect('is ready when the database answers, FFmpeg and ffprobe run, and the folders are writable', () =>
+    Effect.gen(function* () {
+      const service = yield* Health.Service;
+      expect(yield* service.readiness()).toEqual({ status: 'ready', checks: allOk });
+    }).pipe(health()),
+  );
 
-  it('is not ready when a media executable is missing', async () => {
-    const run = health(['ffprobe']);
-    expect(await run((service) => service.readiness)).toEqual({
-      status: 'unavailable',
-      checks: { database: 'ok', ffmpeg: 'ok', ffprobe: 'unavailable' },
-    });
-  });
+  it.effect('is not ready when a media executable is missing', () =>
+    Effect.gen(function* () {
+      const service = yield* Health.Service;
+      expect(yield* service.readiness()).toEqual({
+        status: 'unavailable',
+        checks: { ...allOk, ffprobe: 'unavailable' },
+      });
+    }).pipe(health({ missing: ['ffprobe'] })),
+  );
 
-  it('explains why the active scan is retrying and why recent scans failed', async () => {
-    const retrying = randomUUID();
-    const failed = randomUUID();
-    await database.pool.query(
-      `insert into scan_runs (id, state, attempts, error_summary) values ($1, 'retrying', 1, 'The library database became unavailable.')`,
-      [retrying],
-    );
-    await database.pool.query(
-      `insert into scan_jobs (scan_run_id, attempts, max_attempts, available_at, last_error)
-       values ($1, 1, 3, now() + interval '1 minute', 'DatabaseUnavailable: connection reset')`,
-      [retrying],
-    );
-    await database.pool.query(
-      `insert into scan_runs (id, state, attempts, completed_at, error_summary) values ($1, 'failed', 3, now(), 'The scan stopped unexpectedly.')`,
-      [failed],
-    );
-
-    const run = health();
-    const diagnostics = await run((service) => service.scanDiagnostics);
-    expect(diagnostics.workerLockHeld).toBe(false);
-    expect(diagnostics.worker).toEqual({ workerId: 'test-worker', leader: false, currentScanId: null });
-    expect(diagnostics.activeScan?.scan.id).toBe(retrying);
-    expect(diagnostics.activeScan?.job).toMatchObject({ state: 'pending', attempts: 1 });
-    expect(diagnostics.activeScan?.explanation).toMatch(
-      /^Retrying at .* \(attempt 2 of 3\) after: DatabaseUnavailable: connection reset\. No process holds the scan worker lock/,
-    );
-    expect(diagnostics.recentFailures.map((item) => item.explanation)).toEqual([
-      'The scan failed: The scan stopped unexpectedly.',
-    ]);
-  });
-
-  it('sees the scan worker lock held by another session', async () => {
-    const client = await database.pool.connect();
-    try {
-      await client.query('select pg_advisory_lock($1)', [0x6665726e]);
-      const run = health();
-      expect((await run((service) => service.scanDiagnostics)).workerLockHeld).toBe(true);
-      await client.query('select pg_advisory_unlock($1)', [0x6665726e]);
-    } finally {
-      client.release();
-    }
-  });
+  it.effect('is not ready when a cache or downloads folder cannot be written', () =>
+    Effect.gen(function* () {
+      const service = yield* Health.Service;
+      expect(yield* service.readiness()).toEqual({
+        status: 'unavailable',
+        checks: { ...allOk, hlsCache: 'unavailable', downloads: 'unavailable' },
+      });
+    }).pipe(health({ absent: ['HLS_CACHE_DIR', 'DOWNLOADS_DIR'] })),
+  );
 });

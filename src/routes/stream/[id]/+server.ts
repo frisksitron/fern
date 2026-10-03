@@ -1,8 +1,7 @@
 import path from 'node:path';
-import { Readable } from 'node:stream';
 import { Effect, Schema } from 'effect';
 import { decodeInput, respond } from '$lib/server/http';
-import { fileStats, openFile } from '$lib/server/media/files';
+import { fileBody, fileSize } from '$lib/server/media/files';
 import { mediaFailure } from '$lib/server/media/http';
 import { MediaLibrary } from '$lib/server/media/library';
 import { parseByteRange } from '$lib/server/media/ranges';
@@ -40,8 +39,8 @@ function serve({ params, request }: RequestEvent, head: boolean) {
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      const media = yield* MediaLibrary.use((library) => library.activeMedia(id));
-      const { size } = yield* fileStats(media.path);
+      const media = yield* MediaLibrary.Service.use((library) => library.activeMedia(id));
+      const size = yield* fileSize(media.path);
       const headers = new Headers({
         'accept-ranges': 'bytes',
         'content-type': mimeTypes[path.extname(media.path).toLowerCase()] ?? 'application/octet-stream',
@@ -51,8 +50,7 @@ function serve({ params, request }: RequestEvent, head: boolean) {
       if (!rangeHeader) {
         headers.set('content-length', String(size));
         if (head) return new Response(null, { headers });
-        const handle = yield* openFile(media.path);
-        return new Response(handle.readableWebStream({ autoClose: true }) as ReadableStream, { headers });
+        return new Response(yield* fileBody(media.path), { headers });
       }
 
       const range = parseByteRange(rangeHeader, size);
@@ -60,9 +58,7 @@ function serve({ params, request }: RequestEvent, head: boolean) {
       headers.set('content-range', `bytes ${range.start}-${range.end}/${size}`);
       headers.set('content-length', String(range.end - range.start + 1));
       if (head) return new Response(null, { status: 206, headers });
-      const handle = yield* openFile(media.path);
-      const body = Readable.toWeb(handle.createReadStream({ start: range.start, end: range.end, autoClose: true }));
-      return new Response(body as ReadableStream, { status: 206, headers });
+      return new Response(yield* fileBody(media.path, range), { status: 206, headers });
     }),
     { success: (response) => response, failure: mediaFailure },
   );

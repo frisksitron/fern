@@ -27,11 +27,6 @@ const ProfileName = Schema.Trim.check(Schema.isMinLength(1), Schema.isMaxLength(
 const AvatarKey = Schema.Literals(AVATARS);
 
 /**
- * Rejects a mutation whose row does not exist, on the server only. The browser's Zero store holds
- * just the rows some open query synchronized, so a row missing there proves nothing, and throwing
- * in the browser would drop the mutation before it reaches the server.
- */
-/**
  * Locks a playlist for the rest of the transaction, on the server. Appends and reorders read the
  * playlist's positions and then write new ones; locking makes concurrent writes take turns, with
  * each other and with MCP, which locks the playlist the same way.
@@ -42,6 +37,11 @@ async function lockPlaylist(tx: Transaction, playlistId: string) {
   }
 }
 
+/**
+ * Rejects a mutation whose row does not exist, on the server only. The browser's Zero store holds
+ * just the rows some open query synchronized, so a row missing there proves nothing, and throwing
+ * in the browser would drop the mutation before it reaches the server.
+ */
 function requireOnServer(tx: { readonly location: 'client' | 'server' }, row: unknown, message: string) {
   if (!row && tx.location === 'server') throw new Error(message);
 }

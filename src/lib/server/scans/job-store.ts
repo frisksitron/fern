@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import { Effect } from 'effect';
 import { scanJobs, scanRuns } from '$lib/server/db/schema';
-import { orUnavailable, type FernDatabase, type FernTransaction } from '$lib/server/db/service';
+import { orUnavailable, type Database } from '$lib/server/db/service';
 import type { ScanId } from '$lib/shared/contracts/ids';
 import { transitionScanStatement } from './persistence';
 
@@ -34,12 +34,12 @@ function heldBy(lease: Lease) {
  * The statement that offers a scan's job. Run it in the transaction that creates the scan, so a scan
  * is never accepted without a job. Offering the same scan twice does nothing.
  */
-export function offerJobStatement(db: FernDatabase | FernTransaction, scanId: ScanId, maxAttempts: number) {
+export function offerJobStatement(db: Database.Client | Database.Transaction, scanId: ScanId, maxAttempts: number) {
   return db.insert(scanJobs).values({ scanRunId: scanId, maxAttempts }).onConflictDoNothing();
 }
 
 /** Leases the next due job to `workerId` and starts its next attempt. */
-export function claimNextJob(db: FernDatabase, workerId: string, lockExpirationMs: number) {
+export function claimNextJob(db: Database.Client, workerId: string, lockExpirationMs: number) {
   return orUnavailable(
     db.transaction((tx) =>
       Effect.gen(function* () {
@@ -68,7 +68,7 @@ export function claimNextJob(db: FernDatabase, workerId: string, lockExpirationM
 }
 
 /** Extends a lease. False means the lease is gone: it expired and another worker may own the job. */
-export function renewLease(db: FernDatabase, lease: Lease, lockExpirationMs: number) {
+export function renewLease(db: Database.Client, lease: Lease, lockExpirationMs: number) {
   return orUnavailable(
     db
       .update(scanJobs)
@@ -79,7 +79,7 @@ export function renewLease(db: FernDatabase, lease: Lease, lockExpirationMs: num
 }
 
 /** Marks the job done. False means the lease was lost first. The scanner has already recorded the scan's own result. */
-export function completeJob(db: FernDatabase, lease: Lease) {
+export function completeJob(db: Database.Client, lease: Lease) {
   return orUnavailable(
     db
       .update(scanJobs)
@@ -91,7 +91,7 @@ export function completeJob(db: FernDatabase, lease: Lease) {
 
 /** Schedules the next attempt and shows the scan as retrying. */
 export function retryJob(
-  db: FernDatabase,
+  db: Database.Client,
   lease: Lease,
   retry: { readonly delayMs: number; readonly error: string; readonly summary: string },
 ) {
@@ -121,7 +121,11 @@ export function retryJob(
 }
 
 /** Gives up on the job and fails the scan, in one transaction. */
-export function failJob(db: FernDatabase, lease: Lease, failure: { readonly error: string; readonly summary: string }) {
+export function failJob(
+  db: Database.Client,
+  lease: Lease,
+  failure: { readonly error: string; readonly summary: string },
+) {
   return orUnavailable(
     db.transaction((tx) =>
       Effect.gen(function* () {
@@ -146,7 +150,7 @@ export function failJob(db: FernDatabase, lease: Lease, failure: { readonly erro
  * Hands a job back after a graceful shutdown without using up an attempt. The scan shows as queued
  * until a worker picks it up again.
  */
-export function releaseJob(db: FernDatabase, lease: Lease) {
+export function releaseJob(db: Database.Client, lease: Lease) {
   return orUnavailable(
     db.transaction((tx) =>
       Effect.gen(function* () {
@@ -170,7 +174,7 @@ export function releaseJob(db: FernDatabase, lease: Lease) {
 }
 
 /** Jobs whose worker stopped renewing its lease: the process crashed or lost the database. */
-export function findExpiredLeases(db: FernDatabase) {
+export function findExpiredLeases(db: Database.Client) {
   return orUnavailable(
     db
       .select()
@@ -181,7 +185,7 @@ export function findExpiredLeases(db: FernDatabase) {
 
 /** Deletes finished jobs past their retention. Scan history in `scan_runs` is not affected. */
 export function deleteFinishedJobs(
-  db: FernDatabase,
+  db: Database.Client,
   retention: { readonly completedMs: number; readonly failedMs: number },
 ) {
   return orUnavailable(

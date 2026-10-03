@@ -40,12 +40,12 @@ function terminalEvent(scan: ScanRun): ScanEvent {
 function scanEventStream(id: ScanId) {
   return Stream.unwrap(
     Effect.gen(function* () {
-      const live = yield* ScanEvents.use((events) => events.subscribe(id));
-      const scan = yield* Scans.use((scans) => scans.get(id));
+      const live = yield* ScanEvents.Service.use((events) => events.subscribe(id));
+      const scan = yield* Scans.Service.use((scans) => scans.get(id));
       const replay = Stream.make(serverSentEvent('scan.snapshot', encodeScanRun(scan)));
       if (isTerminalScanState(scan.state)) return replay;
       const finished = Stream.tick(RECHECK_INTERVAL).pipe(
-        Stream.mapEffect(() => Scans.use((scans) => scans.get(id))),
+        Stream.mapEffect(() => Scans.Service.use((scans) => scans.get(id))),
         Stream.filter((row) => isTerminalScanState(row.state)),
         Stream.map(terminalEvent),
       );
@@ -69,7 +69,7 @@ export const GET: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      yield* Scans.use((scans) => scans.get(id));
+      yield* Scans.Service.use((scans) => scans.get(id));
       const body = yield* Stream.toReadableStreamEffect(scanEventStream(id));
       return new Response(body, {
         headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' },

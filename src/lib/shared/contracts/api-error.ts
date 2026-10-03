@@ -49,7 +49,7 @@ export const ApiErrorCode = Schema.Literals([
 export type ApiErrorCode = typeof ApiErrorCode.Type;
 
 export const ApiErrorBody = Schema.Struct({ code: ApiErrorCode, message: Schema.String });
-export type ApiErrorBody = typeof ApiErrorBody.Type;
+export interface ApiErrorBody extends Schema.Schema.Type<typeof ApiErrorBody> {}
 
 const decodeApiError = Schema.decodeUnknownOption(ApiErrorBody);
 

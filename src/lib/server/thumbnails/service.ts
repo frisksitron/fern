@@ -1,51 +1,76 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rename, rm, stat, utimes } from 'node:fs/promises';
 import path from 'node:path';
-import { Clock, Context, Data, Effect, Layer } from 'effect';
+import { NodeServices } from '@effect/platform-node';
+import { Clock, Context, DateTime, Effect, FileSystem, Layer, Option, Schema } from 'effect';
 import { FernConfig } from '$lib/server/config';
+import type { DatabaseUnavailable } from '$lib/server/db/service';
 import { selectEvictions } from '$lib/server/media/cache-policy';
-import { MediaFileUnavailable } from '$lib/server/media/errors';
+import { MediaFileUnavailable, type MediaFileError, type MediaNotFound } from '$lib/server/media/errors';
 import { MediaLibrary } from '$lib/server/media/library';
-import { MediaProcessRunner, type ProcessError } from '$lib/server/media/process-runner';
+import { MediaProcess, ProcessError } from '$lib/server/media/process';
 import { makeCapacity, makeSharedWork, makeThrottled, type CapacityExceeded } from '$lib/server/media/work';
+import { Disk } from '$lib/server/platform/disk';
 import type { MediaEntryId } from '$lib/shared/contracts/ids';
 
 /** FFmpeg could not extract a frame, for example from a file without video. */
-export class ThumbnailFailed extends Data.TaggedError('ThumbnailFailed')<{ readonly cause: ProcessError }> {}
+export class ThumbnailFailed extends Schema.TaggedError<ThumbnailFailed>()('ThumbnailFailed', {
+  cause: ProcessError,
+}) {}
+
+/** A JPEG thumbnail and the cache key that names it, for ETags. */
+export type Thumbnail = { readonly contents: Uint8Array; readonly key: string };
+
+/** Progress-bar and card thumbnails: one JPEG frame per media file and position, cached on disk. */
+export interface Interface {
+  /** The JPEG for a position, clamped to the media, generated on first request. */
+  readonly thumbnailAt: (
+    id: MediaEntryId,
+    positionMs: number,
+  ) => Effect.Effect<
+    Thumbnail,
+    ThumbnailFailed | CapacityExceeded | MediaNotFound | MediaFileError | DatabaseUnavailable
+  >;
+}
+
+export class Service extends Context.Service<Service, Interface>()('@fern/Thumbnails') {}
 
 const CACHE_VERSION = 'v1';
 const thumbnailPattern = /^[a-f0-9]{64}\.jpg$/;
 
-const io = <A>(run: () => Promise<A>) => Effect.orDie(Effect.tryPromise({ try: run, catch: (cause) => cause }));
-const removeQuietly = (file: string) => Effect.promise(() => rm(file, { force: true }));
-
-/** Progress-bar and card thumbnails: one JPEG frame per media file and position, cached on disk. */
-export class Thumbnails extends Context.Service<Thumbnails>()('fern/Thumbnails', {
-  make: Effect.gen(function* () {
-    const config = yield* FernConfig;
-    const runner = yield* MediaProcessRunner;
-    const library = yield* MediaLibrary;
+/** Requires `FernConfig`, `MediaProcess`, `MediaLibrary`, `Disk`, and `FileSystem`. */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const config = yield* FernConfig.Service;
+    const media = yield* MediaProcess.Service;
+    const library = yield* MediaLibrary.Service;
+    const disk = yield* Disk.Service;
+    const fs = yield* FileSystem.FileSystem;
     const directory = config.THUMBNAIL_CACHE_DIR;
     const shared = yield* makeSharedWork<ThumbnailFailed | CapacityExceeded>();
     const capacity = yield* makeCapacity({ concurrency: 2, maxWaiting: 16, maxWait: '15 seconds' });
 
+    const removeQuietly = (file: string) => fs.remove(file, { force: true }).pipe(Effect.ignore);
+
     /** Evicts old thumbnails, at most once a minute because it lists the whole cache directory. */
     const sweepCache = yield* makeThrottled(
       Effect.gen(function* () {
-        const names = yield* Effect.promise(() => readdir(directory).catch(() => [] as string[]));
+        const names = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed((): string[] => []));
         const items = yield* Effect.forEach(
           names.filter((name) => thumbnailPattern.test(name)),
           (name) =>
-            Effect.promise(() =>
-              stat(path.join(directory, name)).then(
-                (info) => ({ key: name, bytes: info.size, lastUsedMs: info.mtimeMs }),
-                () => null,
-              ),
+            fs.stat(path.join(directory, name)).pipe(
+              Effect.map((info) => ({
+                key: name,
+                bytes: Number(info.size),
+                lastUsedMs: Option.match(info.mtime, { onNone: () => 0, onSome: (mtime) => mtime.getTime() }),
+              })),
+              Effect.option,
             ),
           { concurrency: 8 },
         );
         const evictions = selectEvictions(
-          items.filter((item) => item !== null),
+          items.flatMap((item) => (Option.isSome(item) ? [item.value] : [])),
           {
             now: yield* Clock.currentTimeMillis,
             maxAgeMs: config.THUMBNAIL_CACHE_MAX_AGE_HOURS * 3_600_000,
@@ -58,82 +83,72 @@ export class Thumbnails extends Context.Service<Thumbnails>()('fern/Thumbnails',
       '1 minute',
     );
 
-    const generate = (input: string, output: string, positionMs: number) => {
+    const generate = Effect.fn('Thumbnails.generate')(function* (input: string, output: string, positionMs: number) {
       const temporary = `${output}.${randomUUID()}.tmp.jpg`;
-      return Effect.gen(function* () {
-        yield* io(() => mkdir(directory, { recursive: true }));
-        yield* runner
+      yield* Effect.gen(function* () {
+        // Failures of the cache directory itself are defects.
+        yield* fs.makeDirectory(directory, { recursive: true }).pipe(Effect.orDie);
+        yield* media
           .run({
             program: 'ffmpeg',
             args: [
-              '-y',
-              '-v',
-              'error',
-              '-ss',
-              (positionMs / 1000).toFixed(3),
-              '-i',
-              input,
-              '-map',
-              '0:v:0',
-              '-frames:v',
-              '1',
-              '-an',
-              '-vf',
-              'scale=640:-2:force_original_aspect_ratio=decrease',
-              '-q:v',
-              '3',
-              temporary,
+              ...['-y', '-v', 'error', '-ss', (positionMs / 1000).toFixed(3), '-i', input],
+              ...['-map', '0:v:0', '-frames:v', '1', '-an'],
+              ...['-vf', 'scale=640:-2:force_original_aspect_ratio=decrease', '-q:v', '3', temporary],
             ],
             timeout: '30 seconds',
           })
           .pipe(Effect.mapError((cause) => new ThumbnailFailed({ cause })));
-        yield* io(() => rename(temporary, output));
+        yield* fs.rename(temporary, output).pipe(Effect.orDie);
         yield* sweepCache;
-      }).pipe(Effect.ensuring(removeQuietly(temporary)), Effect.withSpan('thumbnail.generate'));
-    };
+      }).pipe(Effect.ensuring(removeQuietly(temporary)));
+    });
 
-    /** The JPEG for a position, clamped to the media, generated on first request. */
-    const thumbnailAt = (id: MediaEntryId, requestedPositionMs: number) =>
-      Effect.gen(function* () {
-        const media = yield* library.activeMedia(id);
-        const info = yield* Effect.tryPromise({
-          try: () => stat(media.path),
-          catch: () => new MediaFileUnavailable({ path: media.path, reason: 'missing' }),
-        });
-        const end = media.entry.durationMs ? Math.max(0, media.entry.durationMs - 1000) : requestedPositionMs;
+    const thumbnailAt = Effect.fn('Thumbnails.thumbnailAt')(
+      function* (id: MediaEntryId, requestedPositionMs: number) {
+        const source = yield* library.activeMedia(id);
+        const version = yield* disk
+          .stat(source.path)
+          .pipe(
+            Effect.catchTag('PathNotFound', () =>
+              Effect.fail(new MediaFileUnavailable({ path: source.path, reason: 'missing' })),
+            ),
+          );
+        const end = source.entry.durationMs ? Math.max(0, source.entry.durationMs - 1000) : requestedPositionMs;
         const positionMs = Math.min(Math.max(0, Math.round(requestedPositionMs)), end);
         const key = createHash('sha256')
-          .update(`${id}:${info.size}:${info.mtimeMs}:${positionMs}:${CACHE_VERSION}`)
+          .update(`${id}:${version.size}:${version.mtimeMs}:${positionMs}:${CACHE_VERSION}`)
           .digest('hex');
         const file = path.join(directory, `${key}.jpg`);
-        const read = Effect.promise(() =>
-          readFile(file).then(
-            (contents) => contents,
-            () => null,
-          ),
-        );
+        const read = fs.readFile(file).pipe(Effect.option);
+
         const cached = yield* read;
-        if (cached) {
-          const now = new Date();
-          yield* Effect.promise(() => utimes(file, now, now).catch(() => undefined));
-          return { contents: cached, key };
+        if (Option.isSome(cached)) {
+          // Marks the thumbnail as recently used, so eviction keeps it.
+          const now = yield* DateTime.nowAsDate;
+          yield* fs.utimes(file, now, now).pipe(Effect.ignore);
+          return { contents: cached.value, key };
         }
         yield* shared
-          .run(file, capacity.withCapacity(generate(media.path, file, positionMs)))
+          .run(file, capacity.withCapacity(generate(source.path, file, positionMs)))
           .pipe(Effect.annotateLogs({ cacheKey: key }));
-        const contents = yield* read;
-        if (!contents) return yield* Effect.die(new Error('Generated thumbnail is missing'));
-        return { contents, key };
-      }).pipe(Effect.annotateLogs({ mediaId: id }));
+        const generated = yield* read;
+        if (Option.isNone(generated)) return yield* Effect.die(new Error('Generated thumbnail is missing'));
+        return { contents: generated.value, key };
+      },
+      (effect, id) => Effect.annotateLogs(effect, { mediaId: id }),
+    );
 
-    return { thumbnailAt } as const;
+    return Service.of({ thumbnailAt });
   }),
-}) {
-  /** Requires `FernConfig`, `MediaProcessRunner`, and `MediaLibrary`. */
-  static readonly layerWithoutDependencies = Layer.effect(this, this.make);
-  /** Requires `Database` and `FernConfig`. */
-  static readonly layer = this.layerWithoutDependencies.pipe(
-    Layer.provide(MediaLibrary.layer),
-    Layer.provide(MediaProcessRunner.layer),
-  );
-}
+);
+
+export const defaultLayer = layer.pipe(
+  Layer.provide(MediaLibrary.defaultLayer),
+  Layer.provide(MediaProcess.defaultLayer),
+  Layer.provide(Disk.layer),
+  Layer.provide(NodeServices.layer),
+  Layer.provide(FernConfig.defaultLayer),
+);
+
+export * as Thumbnails from './service';

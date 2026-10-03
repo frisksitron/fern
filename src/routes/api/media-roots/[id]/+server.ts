@@ -13,7 +13,7 @@ export const DELETE: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      yield* MediaRoots.use((mediaRoots) => mediaRoots.remove(id));
+      yield* MediaRoots.Service.use((mediaRoots) => mediaRoots.remove(id));
     }),
     { success: () => new Response(null, { status: 204 }), failure: removeMediaRootFailure },
   );

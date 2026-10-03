@@ -23,7 +23,7 @@ export const Peak = Schema.Struct({
   /** 0.3 to 1: how far above the song's calmer parts it is. */
   strength: Schema.Finite,
 });
-export type Peak = typeof Peak.Type;
+export interface Peak extends Schema.Schema.Type<typeof Peak> {}
 
 export type TrackMap = {
   /** In order, and never overlapping. */
@@ -47,7 +47,7 @@ export const TrackMapResponse = Schema.Struct({
   hits: Ranges,
   calm: Series,
 });
-export type TrackMapResponse = typeof TrackMapResponse.Type;
+export interface TrackMapResponse extends Schema.Schema.Type<typeof TrackMapResponse> {}
 
 function toSeries(values: Float32Array) {
   const bytes = Uint8Array.from(values, (value) => Math.round(Math.min(1, Math.max(0, value)) * 255));

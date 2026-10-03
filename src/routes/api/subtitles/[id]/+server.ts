@@ -13,7 +13,7 @@ export const GET: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      return yield* Playback.use((playback) => playback.externalSubtitle(id));
+      return yield* Playback.Service.use((playback) => playback.externalSubtitle(id));
     }),
     {
       success: (text) => new Response(text, { headers: { 'content-type': 'text/vtt; charset=utf-8' } }),

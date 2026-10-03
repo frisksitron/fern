@@ -15,7 +15,7 @@ export const ScanCounts = Schema.Struct({
   filesProbed: Count,
   errorsCount: Count,
 });
-export type ScanCounts = typeof ScanCounts.Type;
+export interface ScanCounts extends Schema.Schema.Type<typeof ScanCounts> {}
 
 /** A `scan_runs` row as served by `GET /api/scans/:id`. */
 export const ScanRun = Schema.Struct({
@@ -33,17 +33,17 @@ export const ScanRun = Schema.Struct({
   /** Delivery attempts started; more than one means the scan was retried. */
   attempts: Count,
 });
-export type ScanRun = typeof ScanRun.Type;
+export interface ScanRun extends Schema.Schema.Type<typeof ScanRun> {}
 
 /** `POST /api/scans` body. Without `rootId`, every media root is scanned. */
 export const StartScanRequest = Schema.Struct({ rootId: Schema.optionalKey(MediaRootId) });
-export type StartScanRequest = typeof StartScanRequest.Type;
+export interface StartScanRequest extends Schema.Schema.Type<typeof StartScanRequest> {}
 
 export const StartScanResponse = Schema.Struct({ scanId: ScanId });
 
 /** `GET /api/scans`: the active scan, if any. */
 export const ScanStatusResponse = Schema.Struct({ scan: Schema.NullOr(ScanRun) });
-export type ScanStatusResponse = typeof ScanStatusResponse.Type;
+export interface ScanStatusResponse extends Schema.Schema.Type<typeof ScanStatusResponse> {}
 
 /**
  * Live server-sent events from `GET /api/scans/:id/events`; `type` is the SSE event name. The stream

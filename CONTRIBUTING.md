@@ -55,7 +55,7 @@ Before opening a pull request, run everything CI runs: `format:check`, `check`, 
 
 ### Server
 
-The server is built with [Effect](https://effect.website) v4. One `ManagedRuntime` (`src/lib/server/runtime.ts`) owns every service, background fiber, FFmpeg process, and database pool; it starts with the server and is disposed on shutdown. Services are `Context.Service` classes whose `layer` wires their dependencies.
+The server is built with [Effect](https://effect.website) 4. One `ManagedRuntime` (`src/lib/server/runtime.ts`) owns every service, background fiber, FFmpeg process, and database pool; it starts with the server and is disposed on shutdown. Each service module exports an `Interface`, a `Service`, a `layer` that needs its dependencies, and a `defaultLayer` that wires the production ones, and re-exports itself as a namespace (`MediaLibrary.Service`, `MediaLibrary.defaultLayer`). The `# Effect` section of `AGENTS.md` describes these conventions, and tests use `@effect/vitest`.
 
 Everything a request does runs as an Effect program on that runtime: API routes through `respond`, page loads through `runLoad`, and MCP tools and Zero's endpoints likewise (`src/lib/server/http.ts`). Route parameters and bodies are decoded with Effect Schema at the edge, and every typed failure maps exhaustively to a public error code or, for pages, a redirect. PostgreSQL is reached through Drizzle v1's Effect driver on `@effect/sql-pg`; connection failures become `DatabaseUnavailable` (`503`), and anything else unexpected is a logged defect (`500`).
 
@@ -64,7 +64,7 @@ Everything a request does runs as an Effect program on that runtime: API routes 
 - Validate with Effect Schema. Zod is only for the MCP adapter (`src/lib/server/mcp/`).
 - Reach PostgreSQL only through the Database service (`src/lib/server/db/service.ts`), except for Zero's mutation pool.
 - SvelteKit `redirect` and `error` belong in `src/lib/server/http.ts`, not the server data layer.
-- Spawn FFmpeg and ffprobe only through `src/lib/server/media/process-runner.ts`.
+- Spawn FFmpeg, ffprobe, and yt-dlp only through `MediaProcess` (`src/lib/server/media/process.ts`).
 
 ### Zero synchronization
 

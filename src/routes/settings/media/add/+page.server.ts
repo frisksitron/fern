@@ -17,7 +17,7 @@ export const load: PageServerLoad = async ({ url, request }) => {
   const requested = url.searchParams.get('path');
   return runLoad(
     request,
-    MediaRoots.use((mediaRoots) => mediaRoots.listDirectories(requested)).pipe(
+    MediaRoots.Service.use((mediaRoots) => mediaRoots.listDirectories(requested)).pipe(
       Effect.map((listing) => ({ type, error: null, ...listing })),
       // The picker shows why a folder cannot be opened next to the path the user typed.
       Effect.catch((error) =>

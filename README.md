@@ -20,6 +20,8 @@ Open `http://<your server>:8080`, create a profile, then add `/media` under **Me
 
 To update, run `docker compose pull && docker compose up -d`.
 
+Fern runs as user `fern` (uid 100, gid 101) inside the container. A folder you mount at `/downloads` must be writable by that uid/gid (for example `sudo chown 100:101 /path/to/downloads`); your media folder only needs to be readable. The cache and downloads volumes Compose creates are set up for it already.
+
 ### Configuration
 
 Compose reads `.env`. Only `MEDIA_PATH` is required.
@@ -27,7 +29,7 @@ Compose reads `.env`. Only `MEDIA_PATH` is required.
 | Variable              | Purpose                                                                                                      | Default  |
 | --------------------- | ------------------------------------------------------------------------------------------------------------ | -------- |
 | `MEDIA_PATH`          | Folder with your media, mounted read-only at `/media`                                                        | required |
-| `DOWNLOADS_PATH`      | Folder for songs downloaded from YouTube, mounted at `/downloads`; must be writable by the container         | a volume |
+| `DOWNLOADS_PATH`      | Folder for songs downloaded from YouTube, mounted at `/downloads`; must be writable by uid 100 / gid 101     | a volume |
 | `PORT`                | Port Fern is served on                                                                                       | 8080     |
 | `FERN_VERSION`        | Image tag of `ghcr.io/frisksitron/fern`: `latest` (follows `main`) or `sha-<commit>`                         | `latest` |
 | `POSTGRES_PASSWORD`   | Database password shared by Fern's containers. Postgres isn't reachable from outside the Compose network.    | `fern`   |
@@ -60,8 +62,7 @@ Paste a YouTube link under **Music → YouTube** and Fern saves the video's audi
 ### Health checks
 
 - `GET /health/live`: the server is running
-- `GET /health/ready`: PostgreSQL, FFmpeg, and ffprobe all work (`503` with the failing checks otherwise)
-- `GET /health/scans`: why the current scan is queued, running, or retrying, and why recent scans failed
+- `GET /health/ready`: PostgreSQL, FFmpeg, and ffprobe all work, and the cache and downloads folders are writable (`503` with the failing checks otherwise)
 
 ## Development
 

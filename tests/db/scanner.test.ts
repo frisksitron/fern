@@ -1,42 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { Effect, Layer } from 'effect';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { Database } from '../../src/lib/server/db/service';
-import { MediaProcessRunner, ProcessExited, type ProcessRequest } from '../../src/lib/server/media/process-runner';
-import { FileSystem } from '../../src/lib/server/platform/filesystem';
+import { NodeServices } from '@effect/platform-node';
+import { expect, layer } from '@effect/vitest';
+import { Effect, FileSystem, Layer } from 'effect';
+import { SqlClient } from 'effect/sql';
+import { MediaProbe } from '../../src/lib/server/media/probe';
+import { MediaProcess, ProcessExited, type ProcessRequest } from '../../src/lib/server/media/process';
+import { Disk } from '../../src/lib/server/platform/disk';
 import { ScanEvents } from '../../src/lib/server/scans/events';
 import { Scanner } from '../../src/lib/server/scans/scanner';
 import { ScanId } from '../../src/lib/shared/contracts/ids';
 import { testConfig } from '../support/config';
-import { fakeFileSystem } from '../support/fakes';
-import { createTestDatabase, type TestDatabase } from './support/database';
-
-let database: TestDatabase;
-let library: string;
-
-beforeAll(async () => {
-  database = await createTestDatabase();
-});
-
-afterAll(async () => {
-  await database?.drop();
-});
-
-beforeEach(async () => {
-  await database.pool.query('truncate scan_runs, media_roots cascade');
-  if (library) await rm(library, { recursive: true, force: true });
-  library = await mkdtemp(path.join(tmpdir(), 'fern-scan-'));
-});
-
-async function write(relativePath: string, contents = 'media') {
-  const file = path.join(library, ...relativePath.split('/'));
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, contents);
-}
+import { fakeDisk } from '../support/fakes';
+import { TestDatabase } from './support/database';
 
 function ffprobeJson(file: string) {
   const name = path.basename(file);
@@ -72,10 +49,10 @@ function ffprobeJson(file: string) {
   };
 }
 
-/** Answers ffprobe with canned JSON, fails for files named "broken", and records probe concurrency. */
+/** The real MediaProbe over an ffprobe that answers with canned JSON, fails for files named "broken", and records its concurrency. */
 function fakeFfprobe() {
   const stats = { calls: [] as string[], active: 0, maxActive: 0 };
-  const layer = Layer.succeed(MediaProcessRunner, {
+  const process = Layer.mock(MediaProcess.Service, {
     run: (request: ProcessRequest) =>
       Effect.gen(function* () {
         const file = request.args.at(-1)!;
@@ -84,271 +61,366 @@ function fakeFfprobe() {
         stats.maxActive = Math.max(stats.maxActive, stats.active);
         yield* Effect.sleep('10 millis').pipe(Effect.ensuring(Effect.sync(() => stats.active--)));
         if (file.includes('broken'))
-          return yield* new ProcessExited({ program: 'ffprobe', code: 1, signal: null, stderr: 'Invalid data found' });
+          return yield* new ProcessExited({ program: 'ffprobe', code: 1, stderr: 'Invalid data found' });
         return { stdout: Buffer.from(JSON.stringify(ffprobeJson(file))), stderr: '', durationMs: 10 };
       }),
   });
-  return { stats, layer };
+  return { stats, layer: MediaProbe.layer.pipe(Layer.provide(process)) };
 }
 
-function scanner(runner = fakeFfprobe(), fileSystem: Layer.Layer<FileSystem> = FileSystem.layer) {
-  const layer = Scanner.layerWithoutDependencies.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        database.layer,
-        testConfig({ SCAN_PROBE_CONCURRENCY: '2' }),
-        fileSystem,
-        runner.layer,
-        ScanEvents.layer,
-      ),
+/** A scanner of its own on the block's database. */
+function scanner(probe = fakeFfprobe(), disk: Layer.Layer<Disk.Service> = Disk.layer) {
+  const layer = Layer.fresh(
+    Scanner.layer.pipe(
+      Layer.provide(Layer.mergeAll(testConfig({ SCAN_PROBE_CONCURRENCY: '2' }), disk, probe.layer, ScanEvents.layer)),
     ),
   );
   return {
-    runner,
-    run: (scanId: string) =>
-      Effect.runPromise(
-        Effect.provide(
-          Scanner.use((s) => s.run(ScanId.make(scanId))),
-          layer,
-        ),
-      ),
+    probe,
+    run: (scanId: string) => Scanner.Service.use((s) => s.run(ScanId.make(scanId))).pipe(Effect.provide(layer)),
   };
 }
 
-async function addRoot(rootPath: string, mediaType: 'video' | 'music' = 'video') {
+/** An empty temporary media library, removed when the test ends. */
+const emptyLibrary = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: 'fern-scan-' });
+  const absolute = (relativePath: string) => path.join(root, ...relativePath.split('/'));
+  return {
+    path: root,
+    write: (relativePath: string, contents = 'media') =>
+      fs
+        .makeDirectory(path.dirname(absolute(relativePath)), { recursive: true })
+        .pipe(Effect.andThen(fs.writeFileString(absolute(relativePath), contents)), Effect.orDie),
+    remove: (relativePath: string) => fs.remove(absolute(relativePath), { recursive: true }).pipe(Effect.orDie),
+  };
+});
+
+/** A library with two folders of video, a subtitle, a broken file, and a text file. */
+const videoLibrary = Effect.gen(function* () {
+  const library = yield* emptyLibrary;
+  yield* library.write('Movies/Direct Play.mp4');
+  yield* library.write('Movies/Direct Play.en.srt', '1\n00:00:01,000 --> 00:00:02,000\nHi\n');
+  yield* library.write('Movies/broken.avi');
+  yield* library.write('Shows/Season 1/Episode 1.mkv');
+  yield* library.write('Shows/notes.txt', 'not media');
+  return library;
+});
+
+const addRoot = Effect.fnUntraced(function* (rootPath: string, mediaType: 'video' | 'music' = 'video') {
+  const sql = yield* SqlClient.SqlClient;
   const id = randomUUID();
-  await database.pool.query(
-    `insert into media_roots (id, path, display_name, media_type) values ($1, $2, 'Root', $3)`,
-    [id, rootPath, mediaType],
+  yield* sql`insert into media_roots (id, path, display_name, media_type) values (${id}, ${rootPath}, 'Root', ${mediaType})`;
+  return id;
+});
+
+const queueScan = Effect.fnUntraced(function* (rootId: string | null) {
+  const sql = yield* SqlClient.SqlClient;
+  const id = randomUUID();
+  yield* sql`insert into scan_runs (id, state, root_id) values (${id}, 'queued', ${rootId})`;
+  return id;
+});
+
+const scanRow = Effect.fnUntraced(function* (id: string) {
+  const sql = yield* SqlClient.SqlClient;
+  const [row] = yield* sql`select * from scan_runs where id = ${id}`;
+  return row;
+});
+
+const reset = TestDatabase.truncate('scan_runs', 'media_roots');
+
+layer(Layer.mergeAll(TestDatabase.layer, NodeServices.layer), { excludeTestServices: true })('Scanner', (it) => {
+  it.effect('indexes entries, tracks, and subtitles and records probe failures with their paths', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* videoLibrary;
+      const scanId = yield* queueScan(yield* addRoot(library.path));
+      yield* scanner().run(scanId);
+
+      expect(yield* scanRow(scanId)).toMatchObject({
+        state: 'completed',
+        directories_seen: 3,
+        files_seen: 5,
+        videos_seen: 3,
+        audio_seen: 0,
+        files_probed: 2,
+        errors_count: 1,
+      });
+      expect(
+        yield* sql`select e.relative_path, e.probe_status, p.relative_path as parent
+          from media_entries e left join media_entries p on p.id = e.parent_id order by e.relative_path`,
+      ).toEqual([
+        { relative_path: 'Movies', probe_status: 'not_required', parent: null },
+        { relative_path: 'Movies/Direct Play.en.srt', probe_status: 'not_required', parent: 'Movies' },
+        { relative_path: 'Movies/Direct Play.mp4', probe_status: 'ok', parent: 'Movies' },
+        { relative_path: 'Movies/broken.avi', probe_status: 'failed', parent: 'Movies' },
+        { relative_path: 'Shows', probe_status: 'not_required', parent: null },
+        { relative_path: 'Shows/Season 1', probe_status: 'not_required', parent: 'Shows' },
+        { relative_path: 'Shows/Season 1/Episode 1.mkv', probe_status: 'ok', parent: 'Shows/Season 1' },
+        { relative_path: 'Shows/notes.txt', probe_status: 'not_required', parent: 'Shows' },
+      ]);
+      expect(yield* sql`select count(*)::int as count from media_tracks`).toEqual([{ count: 5 }]);
+      expect(yield* sql`select relative_path, format from external_subtitles`).toEqual([
+        { relative_path: 'Movies/Direct Play.en.srt', format: 'srt' },
+      ]);
+      expect(
+        yield* sql`select stage, error_code, relative_path from scan_errors where scan_run_id = ${scanId}`,
+      ).toEqual([{ stage: 'probe', error_code: 'FFPROBE_FAILED', relative_path: 'Movies/broken.avi' }]);
+    }),
   );
-  return id;
-}
 
-async function queueScan(rootId: string | null) {
-  const id = randomUUID();
-  await database.pool.query(`insert into scan_runs (id, state, root_id) values ($1, 'queued', $2)`, [id, rootId]);
-  return id;
-}
+  it.effect('can run the same scan again without duplicating entries, tracks, or errors', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* videoLibrary;
+      const scanId = yield* queueScan(yield* addRoot(library.path));
+      yield* scanner().run(scanId);
+      const entries = sql`select id, relative_path from media_entries order by relative_path`;
+      const firstIds = yield* entries;
 
-const query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) =>
-  (await database.pool.query(text, params)).rows as T[];
+      // A redelivered scan finds itself running (for example after a crash) and runs again.
+      yield* sql`update scan_runs set state = 'running' where id = ${scanId}`;
+      yield* sql`update media_entries set probe_status = 'pending' where relative_path like '%.mp4'`;
+      yield* scanner().run(scanId);
 
-async function scanRow(id: string) {
-  return (await query('select * from scan_runs where id = $1', [id]))[0];
-}
+      expect(yield* entries).toEqual(firstIds);
+      expect(yield* sql`select count(*)::int as count from media_tracks`).toEqual([{ count: 5 }]);
+      expect(yield* sql`select count(*)::int as count from scan_errors where scan_run_id = ${scanId}`).toEqual([
+        { count: 1 },
+      ]);
+      expect((yield* scanRow(scanId)).state).toBe('completed');
+    }),
+  );
 
-describe('Scanner', () => {
-  beforeEach(async () => {
-    await write('Movies/Direct Play.mp4');
-    await write('Movies/Direct Play.en.srt', '1\n00:00:01,000 --> 00:00:02,000\nHi\n');
-    await write('Movies/broken.avi');
-    await write('Shows/Season 1/Episode 1.mkv');
-    await write('Shows/notes.txt', 'not media');
-  });
+  it.effect('leaves a completed scan alone when it is delivered again', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const library = yield* videoLibrary;
+      const scanId = yield* queueScan(yield* addRoot(library.path));
+      yield* scanner().run(scanId);
+      const again = scanner();
+      yield* again.run(scanId);
+      expect(again.probe.stats.calls).toEqual([]);
+    }),
+  );
 
-  it('indexes entries, tracks, and subtitles and records probe failures with their paths', async () => {
-    const rootId = await addRoot(library);
-    const scanId = await queueScan(rootId);
-    await scanner().run(scanId);
+  it.effect('rewrites and probes only files that still need probing when nothing changed', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* videoLibrary;
+      const rootId = yield* addRoot(library.path);
+      yield* scanner().run(yield* queueScan(rootId));
+      const unchanged = sql`select id, updated_at from media_entries where relative_path <> 'Movies/broken.avi' order by id`;
+      const updatedAt = yield* unchanged;
 
-    expect(await scanRow(scanId)).toMatchObject({
-      state: 'completed',
-      directories_seen: 3,
-      files_seen: 5,
-      videos_seen: 3,
-      audio_seen: 0,
-      files_probed: 2,
-      errors_count: 1,
-    });
-    const entries = await query<{ relative_path: string; probe_status: string; parent: string | null }>(
-      `select e.relative_path, e.probe_status, p.relative_path as parent
-       from media_entries e left join media_entries p on p.id = e.parent_id order by e.relative_path`,
-    );
-    expect(entries).toEqual([
-      { relative_path: 'Movies', probe_status: 'not_required', parent: null },
-      { relative_path: 'Movies/Direct Play.en.srt', probe_status: 'not_required', parent: 'Movies' },
-      { relative_path: 'Movies/Direct Play.mp4', probe_status: 'ok', parent: 'Movies' },
-      { relative_path: 'Movies/broken.avi', probe_status: 'failed', parent: 'Movies' },
-      { relative_path: 'Shows', probe_status: 'not_required', parent: null },
-      { relative_path: 'Shows/Season 1', probe_status: 'not_required', parent: 'Shows' },
-      { relative_path: 'Shows/Season 1/Episode 1.mkv', probe_status: 'ok', parent: 'Shows/Season 1' },
-      { relative_path: 'Shows/notes.txt', probe_status: 'not_required', parent: 'Shows' },
-    ]);
-    expect(await query('select count(*)::int as count from media_tracks')).toEqual([{ count: 5 }]);
-    expect(await query('select relative_path, format from external_subtitles')).toEqual([
-      { relative_path: 'Movies/Direct Play.en.srt', format: 'srt' },
-    ]);
-    expect(
-      await query('select stage, error_code, relative_path from scan_errors where scan_run_id = $1', [scanId]),
-    ).toEqual([{ stage: 'probe', error_code: 'FFPROBE_FAILED', relative_path: 'Movies/broken.avi' }]);
-  });
+      const rescan = scanner();
+      yield* rescan.run(yield* queueScan(rootId));
+      // Only the file that failed to probe is tried again.
+      expect(rescan.probe.stats.calls).toEqual(['broken.avi']);
+      expect(yield* unchanged).toEqual(updatedAt);
+    }),
+  );
 
-  it('can run the same scan again without duplicating entries, tracks, or errors', async () => {
-    const rootId = await addRoot(library);
-    const scanId = await queueScan(rootId);
-    await scanner().run(scanId);
-    const firstIds = await query('select id, relative_path from media_entries order by relative_path');
+  it.effect('probes changed files only, and never more at once than configured', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const library = yield* videoLibrary;
+      for (let index = 0; index < 12; index++) yield* library.write(`Batch/clip-${index}.mp4`);
+      const rootId = yield* addRoot(library.path);
+      const first = scanner();
+      yield* first.run(yield* queueScan(rootId));
+      expect(first.probe.stats.maxActive).toBeLessThanOrEqual(2);
+      expect(first.probe.stats.maxActive).toBeGreaterThan(1);
 
-    // A redelivered scan finds itself running (for example after a crash) and runs again.
-    await database.pool.query(`update scan_runs set state = 'running' where id = $1`, [scanId]);
-    await database.pool.query(`update media_entries set probe_status = 'pending' where relative_path like '%.mp4'`);
-    await scanner().run(scanId);
+      yield* library.write('Batch/clip-3.mp4', 'a longer file now');
+      const rescan = scanner();
+      yield* rescan.run(yield* queueScan(rootId));
+      expect(rescan.probe.stats.calls.sort()).toEqual(['broken.avi', 'clip-3.mp4']);
+    }),
+  );
 
-    expect(await query('select id, relative_path from media_entries order by relative_path')).toEqual(firstIds);
-    expect(await query('select count(*)::int as count from media_tracks')).toEqual([{ count: 5 }]);
-    expect(await query('select count(*)::int as count from scan_errors where scan_run_id = $1', [scanId])).toEqual([
-      { count: 1 },
-    ]);
-    expect((await scanRow(scanId)).state).toBe('completed');
-  });
+  it.effect('removes entries whose files are gone', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* videoLibrary;
+      const rootId = yield* addRoot(library.path);
+      yield* scanner().run(yield* queueScan(rootId));
+      yield* library.remove('Shows');
+      yield* scanner().run(yield* queueScan(rootId));
+      expect(
+        yield* sql`select relative_path from media_entries where deleted_at is not null order by relative_path`,
+      ).toEqual([
+        { relative_path: 'Shows' },
+        { relative_path: 'Shows/Season 1' },
+        { relative_path: 'Shows/Season 1/Episode 1.mkv' },
+        { relative_path: 'Shows/notes.txt' },
+      ]);
+    }),
+  );
 
-  it('leaves a completed scan alone when it is delivered again', async () => {
-    const rootId = await addRoot(library);
-    const scanId = await queueScan(rootId);
-    await scanner().run(scanId);
-    const again = scanner();
-    await again.run(scanId);
-    expect(again.runner.stats.calls).toEqual([]);
-  });
-
-  it('rewrites and probes only files that still need probing when nothing changed', async () => {
-    const rootId = await addRoot(library);
-    await scanner().run(await queueScan(rootId));
-    const unchanged = `select id, updated_at from media_entries where relative_path <> 'Movies/broken.avi' order by id`;
-    const updatedAt = await query(unchanged);
-
-    const rescan = scanner();
-    await rescan.run(await queueScan(rootId));
-    // Only the file that failed to probe is tried again.
-    expect(rescan.runner.stats.calls).toEqual(['broken.avi']);
-    expect(await query(unchanged)).toEqual(updatedAt);
-  });
-
-  it('probes changed files only, and never more at once than configured', async () => {
-    for (let index = 0; index < 12; index++) await write(`Batch/clip-${index}.mp4`);
-    const rootId = await addRoot(library);
-    const first = scanner();
-    await first.run(await queueScan(rootId));
-    expect(first.runner.stats.maxActive).toBeLessThanOrEqual(2);
-    expect(first.runner.stats.maxActive).toBeGreaterThan(1);
-
-    await write('Batch/clip-3.mp4', 'a longer file now');
-    const rescan = scanner();
-    await rescan.run(await queueScan(rootId));
-    expect(rescan.runner.stats.calls.sort()).toEqual(['broken.avi', 'clip-3.mp4']);
-  });
-
-  it('removes entries whose files are gone', async () => {
-    const rootId = await addRoot(library);
-    await scanner().run(await queueScan(rootId));
-    await rm(path.join(library, 'Shows'), { recursive: true });
-    await scanner().run(await queueScan(rootId));
-    expect(
-      await query(`select relative_path from media_entries where deleted_at is not null order by relative_path`),
-    ).toEqual([
-      { relative_path: 'Shows' },
-      { relative_path: 'Shows/Season 1' },
-      { relative_path: 'Shows/Season 1/Episode 1.mkv' },
-      { relative_path: 'Shows/notes.txt' },
-    ]);
-  });
-
-  it('keeps entries under a folder that could not be read', async () => {
-    const tree = fakeFileSystem(
-      {
+  it.effect('keeps only the entries under paths that could not be read, and still removes the rest', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const files = {
         '/library/Movies/a.mp4': { size: 5 },
+        '/library/Movies/gone.mp4': { size: 5 },
+        '/library/Movies/gone.en.srt': { size: 5 },
+        '/library/Movies/stuck.mp4': { size: 5 },
         '/library/Locked/b.mp4': { size: 5 },
-      },
-      { denied: ['/library/Locked'] },
-    );
-    const rootId = await addRoot('/library');
-    const scanId = await queueScan(rootId);
-    // Index both folders first, then make one unreadable.
-    await scanner(
-      fakeFfprobe(),
-      fakeFileSystem({ '/library/Movies/a.mp4': { size: 5 }, '/library/Locked/b.mp4': { size: 5 } }),
-    ).run(scanId);
-    const second = await queueScan(rootId);
-    await scanner(fakeFfprobe(), tree).run(second);
+        '/library/Locked/b.en.srt': { size: 5 },
+      };
+      const rootId = yield* addRoot('/library');
+      // Index everything first, then make one folder and one file unreadable and delete two files.
+      yield* scanner(fakeFfprobe(), fakeDisk(files)).run(yield* queueScan(rootId));
+      yield* sql`update media_roots set last_scanned_at = null`;
+      const { '/library/Movies/gone.mp4': _video, '/library/Movies/gone.en.srt': _subtitle, ...remaining } = files;
+      const second = yield* queueScan(rootId);
+      yield* scanner(
+        fakeFfprobe(),
+        fakeDisk(remaining, { denied: ['/library/Locked', '/library/Movies/stuck.mp4'] }),
+      ).run(second);
 
-    expect(await query(`select count(*)::int as count from media_entries where deleted_at is not null`)).toEqual([
-      { count: 0 },
-    ]);
-    expect(await query('select stage, error_code from scan_errors where scan_run_id = $1', [second])).toEqual([
-      { stage: 'walk', error_code: 'PATH_UNREADABLE' },
-    ]);
-  });
+      expect(
+        yield* sql`select relative_path from media_entries where deleted_at is not null order by relative_path`,
+      ).toEqual([{ relative_path: 'Movies/gone.en.srt' }, { relative_path: 'Movies/gone.mp4' }]);
+      expect(
+        yield* sql`select relative_path, deleted_at is not null as deleted from external_subtitles order by relative_path`,
+      ).toEqual([
+        { relative_path: 'Locked/b.en.srt', deleted: false },
+        { relative_path: 'Movies/gone.en.srt', deleted: true },
+      ]);
+      expect(
+        yield* sql`select relative_path, stage, error_code from scan_errors where scan_run_id = ${second} order by relative_path`,
+      ).toEqual([
+        { relative_path: 'Locked', stage: 'walk', error_code: 'PATH_UNREADABLE' },
+        { relative_path: 'Movies/stuck.mp4', stage: 'walk', error_code: 'PATH_UNREADABLE' },
+      ]);
+      // The root was walked, so it counts as scanned even though parts of it were unreadable.
+      expect(yield* sql`select last_scanned_at is not null as scanned from media_roots`).toEqual([{ scanned: true }]);
+    }),
+  );
 
-  it('records an unavailable root and still scans the others', async () => {
-    await addRoot(path.join(library, 'missing'));
-    await addRoot(library);
-    const scanId = await queueScan(null);
-    await scanner().run(scanId);
-    expect(await scanRow(scanId)).toMatchObject({ state: 'completed', videos_seen: 3, errors_count: 2 });
-    expect(
-      await query('select error_code from scan_errors where scan_run_id = $1 order by error_code', [scanId]),
-    ).toEqual([{ error_code: 'FFPROBE_FAILED' }, { error_code: 'ROOT_UNAVAILABLE' }]);
-  });
+  it.effect('skips system folders and files that vanish mid-scan without recording errors', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const files = {
+        '/library/Movies/a.mp4': { size: 5 },
+        '/library/lost+found/lost.mp4': { size: 5 },
+        '/library/System Volume Information/x.mp4': { size: 5 },
+        '/library/Movies/@eaDir/a.mp4/thumb.mp4': { size: 5 },
+      };
+      const scanId = yield* queueScan(yield* addRoot('/library'));
+      yield* scanner(fakeFfprobe(), fakeDisk(files, { vanished: ['/library/Movies/vanished.mp4'] })).run(scanId);
 
-  it('assigns the best-ranked folder artwork to music and updates it when it changes', async () => {
-    await rm(library, { recursive: true, force: true });
-    await write('Album/cover.jpg', 'jpeg');
-    await write('Album/folder.png', 'png');
-    await write('Album/Disc 1/01 Song.mp3');
-    const rootId = await addRoot(library, 'music');
-    await scanner().run(await queueScan(rootId));
+      expect(yield* scanRow(scanId)).toMatchObject({ state: 'completed', errors_count: 0 });
+      expect(yield* sql`select relative_path from media_entries order by relative_path`).toEqual([
+        { relative_path: 'Movies' },
+        { relative_path: 'Movies/a.mp4' },
+      ]);
+    }),
+  );
 
-    const artwork = async () =>
-      query<{ relative_path: string; artwork: string | null }>(
-        `select e.relative_path, a.relative_path as artwork from media_entries e
-         left join media_entries a on a.id = e.artwork_media_entry_id
-         where e.kind = 'directory' or e.is_audio order by e.relative_path`,
-      );
-    expect(await artwork()).toEqual([
-      { relative_path: 'Album', artwork: 'Album/cover.jpg' },
-      { relative_path: 'Album/Disc 1', artwork: 'Album/cover.jpg' },
-      { relative_path: 'Album/Disc 1/01 Song.mp3', artwork: 'Album/cover.jpg' },
-    ]);
+  it.effect('removes subtitles whose files are gone and restores them when they return', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* videoLibrary;
+      const rootId = yield* addRoot(library.path);
+      yield* scanner().run(yield* queueScan(rootId));
+      const subtitles = sql`select relative_path, deleted_at is not null as deleted from external_subtitles`;
+      expect(yield* subtitles).toEqual([{ relative_path: 'Movies/Direct Play.en.srt', deleted: false }]);
 
-    await rm(path.join(library, 'Album', 'cover.jpg'));
-    await scanner().run(await queueScan(rootId));
-    expect((await artwork()).map((row) => row.artwork)).toEqual([
-      'Album/folder.png',
-      'Album/folder.png',
-      'Album/folder.png',
-    ]);
-  });
+      yield* library.remove('Movies/Direct Play.en.srt');
+      yield* scanner().run(yield* queueScan(rootId));
+      expect(yield* subtitles).toEqual([{ relative_path: 'Movies/Direct Play.en.srt', deleted: true }]);
 
-  it('stores a mix’s chapters and its own cover, and replaces the chapters when the file changes', async () => {
-    await rm(library, { recursive: true, force: true });
-    await write('Chrysalis/cover.jpg', 'jpeg');
-    await write('Chrysalis/Late Mix [rBarjCP_KUs].opus', 'mix');
-    await write('Chrysalis/Late Mix [rBarjCP_KUs].jpg', 'jpeg');
-    const rootId = await addRoot(library, 'music');
-    await scanner().run(await queueScan(rootId));
+      yield* library.write('Movies/Direct Play.en.srt', 'subtitle');
+      yield* scanner().run(yield* queueScan(rootId));
+      expect(yield* subtitles).toEqual([{ relative_path: 'Movies/Direct Play.en.srt', deleted: false }]);
+    }),
+  );
 
-    const [song] = await query<{ title: string; artist: string; artwork: string }>(
-      `select e.title, e.artist, a.relative_path as artwork from media_entries e
-       join media_entries a on a.id = e.artwork_media_entry_id where e.is_audio`,
-    );
-    expect(song).toEqual({
-      title: 'Late Mix',
-      artist: 'Chrysalis',
-      artwork: 'Chrysalis/Late Mix [rBarjCP_KUs].jpg',
-    });
-    const chapters = () =>
-      query(
-        `select c.position, c.start_ms::int, c.end_ms::int, c.title from media_chapters c
-         join media_entries e on e.id = c.media_entry_id order by c.position`,
-      );
-    // The last chapter ends after the file does, so it is cut at the file's duration.
-    expect(await chapters()).toEqual([
-      { position: 0, start_ms: 0, end_ms: 200_000, title: 'Intro' },
-      { position: 1, start_ms: 200_000, end_ms: 600_000, title: 'Second Song' },
-    ]);
+  it.effect('records an unavailable root and still scans the others', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* videoLibrary;
+      yield* addRoot(path.join(library.path, 'missing'));
+      yield* addRoot(library.path);
+      const scanId = yield* queueScan(null);
+      yield* scanner().run(scanId);
+      expect(yield* scanRow(scanId)).toMatchObject({ state: 'completed', videos_seen: 3, errors_count: 2 });
+      expect(yield* sql`select error_code from scan_errors where scan_run_id = ${scanId} order by error_code`).toEqual([
+        { error_code: 'FFPROBE_FAILED' },
+        { error_code: 'ROOT_UNAVAILABLE' },
+      ]);
+    }),
+  );
 
-    await write('Chrysalis/Late Mix [rBarjCP_KUs].opus', 'mix, recut');
-    await scanner().run(await queueScan(rootId));
-    expect(await chapters()).toEqual([{ position: 0, start_ms: 0, end_ms: 600_000, title: 'Whole Mix' }]);
-  });
+  it.effect('assigns the best-ranked folder artwork to music and updates it when it changes', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* emptyLibrary;
+      yield* library.write('Album/cover.jpg', 'jpeg');
+      yield* library.write('Album/folder.png', 'png');
+      yield* library.write('Album/Disc 1/01 Song.mp3');
+      const rootId = yield* addRoot(library.path, 'music');
+      yield* scanner().run(yield* queueScan(rootId));
+
+      const artwork = sql<{ relative_path: string; artwork: string | null }>`
+        select e.relative_path, a.relative_path as artwork from media_entries e
+        left join media_entries a on a.id = e.artwork_media_entry_id
+        where e.kind = 'directory' or e.is_audio order by e.relative_path`;
+      expect(yield* artwork).toEqual([
+        { relative_path: 'Album', artwork: 'Album/cover.jpg' },
+        { relative_path: 'Album/Disc 1', artwork: 'Album/cover.jpg' },
+        { relative_path: 'Album/Disc 1/01 Song.mp3', artwork: 'Album/cover.jpg' },
+      ]);
+
+      yield* library.remove('Album/cover.jpg');
+      yield* scanner().run(yield* queueScan(rootId));
+      expect((yield* artwork).map((row) => row.artwork)).toEqual([
+        'Album/folder.png',
+        'Album/folder.png',
+        'Album/folder.png',
+      ]);
+    }),
+  );
+
+  it.effect('stores a mix’s chapters and its own cover, and replaces the chapters when the file changes', () =>
+    Effect.gen(function* () {
+      yield* reset;
+      const sql = yield* SqlClient.SqlClient;
+      const library = yield* emptyLibrary;
+      yield* library.write('Chrysalis/cover.jpg', 'jpeg');
+      yield* library.write('Chrysalis/Late Mix [rBarjCP_KUs].opus', 'mix');
+      yield* library.write('Chrysalis/Late Mix [rBarjCP_KUs].jpg', 'jpeg');
+      const rootId = yield* addRoot(library.path, 'music');
+      yield* scanner().run(yield* queueScan(rootId));
+
+      expect(
+        yield* sql`select e.title, e.artist, a.relative_path as artwork from media_entries e
+          join media_entries a on a.id = e.artwork_media_entry_id where e.is_audio`,
+      ).toEqual([{ title: 'Late Mix', artist: 'Chrysalis', artwork: 'Chrysalis/Late Mix [rBarjCP_KUs].jpg' }]);
+      const chapters = sql`
+        select c.position, c.start_ms::int, c.end_ms::int, c.title from media_chapters c
+        join media_entries e on e.id = c.media_entry_id order by c.position`;
+      // The last chapter ends after the file does, so it is cut at the file's duration.
+      expect(yield* chapters).toEqual([
+        { position: 0, start_ms: 0, end_ms: 200_000, title: 'Intro' },
+        { position: 1, start_ms: 200_000, end_ms: 600_000, title: 'Second Song' },
+      ]);
+
+      yield* library.write('Chrysalis/Late Mix [rBarjCP_KUs].opus', 'mix, recut');
+      yield* scanner().run(yield* queueScan(rootId));
+      expect(yield* chapters).toEqual([{ position: 0, start_ms: 0, end_ms: 600_000, title: 'Whole Mix' }]);
+    }),
+  );
 });

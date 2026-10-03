@@ -1,22 +1,23 @@
 import path from 'node:path';
 import { Clock, Context, Effect, Layer } from 'effect';
 import { FernConfig } from '$lib/server/config';
-import { Database, type DatabaseUnavailable } from '$lib/server/db/service';
 import type { mediaRoots } from '$lib/server/db/schema';
-import { MediaProcessRunner } from '$lib/server/media/process-runner';
-import { probeMedia, type ProbeFailed, type ProbeResult } from '$lib/server/media/probe';
-import { FileSystem, type FileSystemError } from '$lib/server/platform/filesystem';
+import { Database, type DatabaseUnavailable } from '$lib/server/db/service';
+import { MediaProbe, type ProbeFailed, type ProbeResult } from '$lib/server/media/probe';
+import { Disk, type FileSystemError } from '$lib/server/platform/disk';
 import type { MediaRootId, ScanId } from '$lib/shared/contracts/ids';
-import type { ScanCounts } from '$lib/shared/contracts/scans';
+import type { ScanCounts, ScanState } from '$lib/shared/contracts/scans';
 import { ScanEvents } from './events';
 import {
   clearScanErrors,
+  loadActiveSubtitles,
   loadExistingEntries,
   loadRoots,
   loadScan,
   markRootScanned,
   recordScanErrors,
   softDeleteEntries,
+  softDeleteSubtitles,
   transitionScan,
   updateArtwork,
   upsertEntries,
@@ -25,7 +26,7 @@ import {
   writeProgress,
   type ProbeOutcome,
 } from './persistence';
-import { planArtwork, planEntries, planSubtitles, type PlannedEntry } from './plan';
+import { planArtwork, planEntries, planSubtitleRemovals, planSubtitles, type PlannedEntry } from './plan';
 import { isTerminalScanState } from './state';
 import { traverseRoot, type RootUnavailable } from './traversal';
 
@@ -91,102 +92,112 @@ const zeroCounts = (): Counts => ({
  * Executes scans. Running the same scan ID again is safe: entries are matched by path, only changes
  * are written, tracks are replaced, and the scan's error list starts afresh.
  */
-export class Scanner extends Context.Service<Scanner>()('fern/Scanner', {
-  make: Effect.gen(function* () {
-    const db = yield* Database;
-    const events = yield* ScanEvents;
-    const { SCAN_PROBE_CONCURRENCY } = yield* FernConfig;
-    const fs = yield* FileSystem;
-    const runner = yield* MediaProcessRunner;
+export interface Interface {
+  /**
+   * Runs a scan to completion. Rerunning a scan repeats its work safely, and a scan that already
+   * finished is left alone, so redelivering a scan is harmless. Database failures end the run; the
+   * scan worker decides whether to retry.
+   */
+  readonly run: (scanId: ScanId) => Effect.Effect<void, DatabaseUnavailable>;
+}
 
-    const withIo = <A, E>(effect: Effect.Effect<A, E, FileSystem | MediaProcessRunner>) =>
-      effect.pipe(Effect.provideService(FileSystem, fs), Effect.provideService(MediaProcessRunner, runner));
+export class Service extends Context.Service<Service, Interface>()('@fern/Scanner') {}
+
+/** Requires `Database`, `FernConfig`, `Disk`, `MediaProbe`, and `ScanEvents`. */
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const db = yield* Database.Service;
+    const events = yield* ScanEvents.Service;
+    const config = yield* FernConfig.Service;
+    const disk = yield* Disk.Service;
+    const prober = yield* MediaProbe.Service;
 
     /** Persists and publishes progress, throttled to PROGRESS_INTERVAL_MS. */
     const progressReporter = (scanId: ScanId, counts: Counts) => {
       let lastWrite = Number.NEGATIVE_INFINITY;
-      return (rootId: string, currentPath: string, force = false) =>
-        Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis;
-          if (!force && now - lastWrite < PROGRESS_INTERVAL_MS) return;
-          lastWrite = now;
-          const snapshot = { ...counts };
-          yield* writeProgress(db, scanId, { ...snapshot, currentRootId: rootId, currentPath });
-          yield* events.publish(scanId, {
-            type: 'scan.progress',
-            data: { state: 'running', rootId: rootId as MediaRootId, currentDisplayPath: currentPath, ...snapshot },
-          });
+      return Effect.fnUntraced(function* (rootId: string, currentPath: string, force = false) {
+        const now = yield* Clock.currentTimeMillis;
+        if (!force && now - lastWrite < PROGRESS_INTERVAL_MS) return;
+        lastWrite = now;
+        const snapshot = { ...counts };
+        yield* writeProgress(db, scanId, { ...snapshot, currentRootId: rootId, currentPath });
+        yield* events.publish(scanId, {
+          type: 'scan.progress',
+          data: { state: 'running', rootId: rootId as MediaRootId, currentDisplayPath: currentPath, ...snapshot },
         });
+      });
     };
 
     type Report = ReturnType<typeof progressReporter>;
 
     /** Probes pending media with bounded concurrency, writing each batch in one transaction. */
-    const probePending = (
+    const probePending = Effect.fnUntraced(function* (
       scanId: ScanId,
       root: MediaRoot,
       pending: readonly PlannedEntry[],
       counts: Counts,
       report: Report,
-    ) =>
-      Effect.gen(function* () {
-        let probed = 0;
-        let failures = 0;
-        for (let index = 0; index < pending.length; index += PROBE_BATCH_SIZE) {
-          const batch = pending.slice(index, index + PROBE_BATCH_SIZE);
-          const outcomes = yield* Effect.forEach(
-            batch,
-            (entry) =>
-              withIo(probeMedia(path.join(root.path, ...entry.relativePath.split('/')))).pipe(
-                Effect.map((result): RawProbeOutcome => ({ id: entry.id, relativePath: entry.relativePath, result })),
-                Effect.catchTag('ProbeFailed', (failure) =>
-                  Effect.succeed<RawProbeOutcome>({ id: entry.id, relativePath: entry.relativePath, failure }),
-                ),
+    ) {
+      let probed = 0;
+      let failures = 0;
+      for (let index = 0; index < pending.length; index += PROBE_BATCH_SIZE) {
+        const batch = pending.slice(index, index + PROBE_BATCH_SIZE);
+        const outcomes = yield* Effect.forEach(
+          batch,
+          (entry) =>
+            prober.probe(path.join(root.path, ...entry.relativePath.split('/'))).pipe(
+              Effect.map((result): RawProbeOutcome => ({ id: entry.id, relativePath: entry.relativePath, result })),
+              Effect.catchTag('ProbeFailed', (failure) =>
+                Effect.succeed<RawProbeOutcome>({ id: entry.id, relativePath: entry.relativePath, failure }),
               ),
-            { concurrency: SCAN_PROBE_CONCURRENCY },
-          );
-          // Without ffprobe nothing can be probed: leave the entries pending for a later scan.
-          if (outcomes.some((outcome) => 'failure' in outcome && outcome.failure.cause._tag === 'ProcessSpawnFailed')) {
-            counts.errorsCount++;
-            yield* recordScanErrors(db, scanId, [
-              {
-                mediaRootId: root.id,
-                relativePath: null,
-                stage: 'probe',
-                errorCode: 'FFPROBE_UNAVAILABLE',
-                message: 'ffprobe could not be started; media stays pending until a later scan.',
-              },
-            ]);
-            yield* Effect.logWarning('ffprobe is unavailable; skipped probing');
-            break;
-          }
-          const stored = outcomes.map((outcome): ProbeOutcome =>
-            'failure' in outcome
-              ? { id: outcome.id, relativePath: outcome.relativePath, error: describeProbeFailure(outcome.failure) }
-              : outcome,
-          );
-          yield* writeProbeOutcomes(db, scanId, root.id, stored);
-          const batchFailures = stored.filter((outcome) => 'error' in outcome).length;
-          failures += batchFailures;
-          probed += stored.length - batchFailures;
-          counts.filesProbed += stored.length - batchFailures;
-          counts.errorsCount += batchFailures;
-          yield* report(root.id, batch.at(-1)!.relativePath);
+            ),
+          { concurrency: config.SCAN_PROBE_CONCURRENCY },
+        );
+        // Without ffprobe nothing can be probed: leave the entries pending for a later scan.
+        if (outcomes.some((outcome) => 'failure' in outcome && outcome.failure.cause._tag === 'ProcessSpawnFailed')) {
+          counts.errorsCount++;
+          yield* recordScanErrors(db, scanId, [
+            {
+              mediaRootId: root.id,
+              relativePath: null,
+              stage: 'probe',
+              errorCode: 'FFPROBE_UNAVAILABLE',
+              message: 'ffprobe could not be started; media stays pending until a later scan.',
+            },
+          ]);
+          yield* Effect.logWarning('ffprobe is unavailable; skipped probing');
+          break;
         }
-        return { probed, failures };
-      });
+        const stored = outcomes.map((outcome): ProbeOutcome =>
+          'failure' in outcome
+            ? { id: outcome.id, relativePath: outcome.relativePath, error: describeProbeFailure(outcome.failure) }
+            : outcome,
+        );
+        yield* writeProbeOutcomes(db, scanId, root.id, stored);
+        const batchFailures = stored.filter((outcome) => 'error' in outcome).length;
+        failures += batchFailures;
+        probed += stored.length - batchFailures;
+        counts.filesProbed += stored.length - batchFailures;
+        counts.errorsCount += batchFailures;
+        yield* report(root.id, batch.at(-1)!.relativePath);
+      }
+      return { probed, failures };
+    });
 
-    const scanRoot = (
-      scanId: ScanId,
-      root: MediaRoot,
-      counts: Counts,
-      report: Report,
-    ): Effect.Effect<RootScanStats, RootUnavailable | DatabaseUnavailable> =>
-      Effect.gen(function* () {
+    const scanRoot = Effect.fn('Scanner.scanRoot')(
+      function* (scanId: ScanId, root: MediaRoot, counts: Counts, report: Report) {
+        yield* Effect.annotateCurrentSpan({ rootId: root.id });
         const started = yield* Clock.currentTimeMillis;
-        const traversal = yield* withIo(traverseRoot(root.path, (directory) => report(root.id, directory)));
+        const traversal = yield* traverseRoot(disk, root.path, (directory) => report(root.id, directory));
         const existing = yield* loadExistingEntries(db, root.id);
-        const plan = planEntries(root.mediaType === 'music' ? 'music' : 'video', traversal.items, existing);
+        const unreadablePaths = traversal.warnings.map((warning) => warning.relativePath);
+        const plan = planEntries(
+          root.mediaType === 'music' ? 'music' : 'video',
+          traversal.items,
+          existing,
+          unreadablePaths,
+        );
 
         for (const entry of plan.entries) {
           if (entry.kind === 'directory') counts.directoriesSeen++;
@@ -200,9 +211,10 @@ export class Scanner extends Context.Service<Scanner>()('fern/Scanner', {
         yield* report(root.id, '', true);
 
         const pending = plan.entries.filter((entry) => entry.probeStatus === 'pending');
-        const { probed, failures } = yield* probePending(scanId, root, pending, counts, report);
+        const probing = yield* probePending(scanId, root, pending, counts, report);
 
-        yield* upsertSubtitles(db, planSubtitles(plan.entries));
+        const subtitles = planSubtitles(plan.entries);
+        yield* upsertSubtitles(db, subtitles);
         if (root.mediaType === 'music')
           yield* updateArtwork(
             db,
@@ -222,41 +234,65 @@ export class Scanner extends Context.Service<Scanner>()('fern/Scanner', {
           })),
         );
 
-        // Missing entries are only removed after a complete walk: an unreadable folder, such as a
-        // network share that dropped mid-scan, must not make its contents look deleted.
-        if (traversal.warnings.length === 0) {
-          yield* softDeleteEntries(db, plan.removedIds);
-          yield* markRootScanned(db, root.id);
-        } else {
-          yield* Effect.logWarning('Parts of the media root could not be read; kept entries that were not found');
-        }
+        // Entries missing from the walk are removed, except those under a path that could not be
+        // read: an unreadable folder, such as a network share that dropped mid-scan, must not make
+        // its contents look deleted. The walk of the root itself succeeded, so the root counts as scanned.
+        yield* softDeleteEntries(db, plan.removedIds);
+        const staleSubtitles = planSubtitleRemovals(
+          yield* loadActiveSubtitles(db, root.id),
+          subtitles,
+          unreadablePaths,
+        );
+        yield* softDeleteSubtitles(db, staleSubtitles);
+        yield* markRootScanned(db, root.id);
+        if (traversal.warnings.length > 0)
+          yield* Effect.logWarning('Parts of the media root could not be read; kept their entries');
 
         const stats: RootScanStats = {
           entriesFound: plan.entries.length,
           entriesWritten: changed.length,
-          entriesRemoved: traversal.warnings.length === 0 ? plan.removedIds.length : 0,
+          entriesRemoved: plan.removedIds.length,
           writeStatements,
-          probed,
-          probeFailures: failures,
+          probed: probing.probed,
+          probeFailures: probing.failures,
           unreadablePaths: traversal.warnings.length,
           durationMs: (yield* Clock.currentTimeMillis) - started,
         };
         yield* Effect.logInfo('Scanned media root').pipe(Effect.annotateLogs(stats));
         return stats;
-      }).pipe(
-        Effect.annotateLogs({ rootId: root.id }),
-        Effect.withSpan('scan.root', { attributes: { rootId: root.id } }),
-      );
+      },
+      (effect, _scanId, root) => Effect.annotateLogs(effect, { rootId: root.id }),
+    );
 
-    /**
-     * Runs a scan to completion. Rerunning a scan repeats its work safely, and a scan that already
-     * finished is left alone, so redelivering a scan is harmless. Database failures end the run; the
-     * scan worker decides whether to retry.
-     */
-    const run = (scanId: ScanId): Effect.Effect<void, DatabaseUnavailable> =>
-      Effect.gen(function* () {
+    /** Records a media root that could not be read; the scan goes on with the next one. */
+    const recordUnavailableRoot = Effect.fnUntraced(function* (
+      scanId: ScanId,
+      root: MediaRoot,
+      counts: Counts,
+      error: RootUnavailable,
+    ) {
+      counts.errorsCount++;
+      yield* recordScanErrors(db, scanId, [
+        {
+          mediaRootId: root.id,
+          relativePath: null,
+          stage: 'walk',
+          errorCode: 'ROOT_UNAVAILABLE',
+          message: describeFileSystemError(error.cause),
+        },
+      ]);
+      yield* events.publish(scanId, {
+        type: 'scan.warning',
+        data: { rootId: root.id as MediaRootId, message: 'This media folder could not be read.' },
+      });
+      yield* Effect.logWarning('Media root unavailable').pipe(Effect.annotateLogs({ rootId: root.id }));
+    });
+
+    const run = Effect.fn('Scanner.run')(
+      function* (scanId: ScanId) {
+        yield* Effect.annotateCurrentSpan({ scanId });
         const scan = yield* loadScan(db, scanId);
-        if (!scan || isTerminalScanState(scan.state as never)) return;
+        if (!scan || isTerminalScanState(scan.state as ScanState)) return;
         if (scan.state !== 'running')
           yield* transitionScan(db, scanId, 'running', { startedAt: scan.startedAt ?? new Date(), errorSummary: null });
         yield* clearScanErrors(db, scanId);
@@ -266,25 +302,7 @@ export class Scanner extends Context.Service<Scanner>()('fern/Scanner', {
         const report = progressReporter(scanId, counts);
         for (const root of yield* loadRoots(db, scan.rootId)) {
           yield* scanRoot(scanId, root, counts, report).pipe(
-            Effect.catchTag('RootUnavailable', (error) =>
-              Effect.gen(function* () {
-                counts.errorsCount++;
-                yield* recordScanErrors(db, scanId, [
-                  {
-                    mediaRootId: root.id,
-                    relativePath: null,
-                    stage: 'walk',
-                    errorCode: 'ROOT_UNAVAILABLE',
-                    message: describeFileSystemError(error.cause),
-                  },
-                ]);
-                yield* events.publish(scanId, {
-                  type: 'scan.warning',
-                  data: { rootId: root.id as MediaRootId, message: 'This media folder could not be read.' },
-                });
-                yield* Effect.logWarning('Media root unavailable').pipe(Effect.annotateLogs({ rootId: root.id }));
-              }),
-            ),
+            Effect.catchTag('RootUnavailable', (error) => recordUnavailableRoot(scanId, root, counts, error)),
           );
         }
 
@@ -294,16 +312,20 @@ export class Scanner extends Context.Service<Scanner>()('fern/Scanner', {
           ...counts,
         });
         yield* events.publish(scanId, { type: 'scan.completed', data: { state: 'completed', ...counts } });
-      }).pipe(Effect.annotateLogs({ scanId }), Effect.withSpan('scan.run', { attributes: { scanId } }));
+      },
+      (effect, scanId) => Effect.annotateLogs(effect, { scanId }),
+    );
 
-    return { run } as const;
+    return Service.of({ run });
   }),
-}) {
-  /** Requires `Database`, `FernConfig`, `FileSystem`, `MediaProcessRunner`, and `ScanEvents`. */
-  static readonly layerWithoutDependencies = Layer.effect(this, this.make);
-  /** Requires `Database`, `FernConfig`, and `ScanEvents` (shared with event subscribers). */
-  static readonly layer = this.layerWithoutDependencies.pipe(
-    Layer.provide(MediaProcessRunner.layer),
-    Layer.provide(FileSystem.layer),
-  );
-}
+);
+
+export const defaultLayer = layer.pipe(
+  Layer.provide(Database.defaultLayer),
+  Layer.provide(ScanEvents.defaultLayer),
+  Layer.provide(FernConfig.defaultLayer),
+  Layer.provide(Disk.layer),
+  Layer.provide(MediaProbe.defaultLayer),
+);
+
+export * as Scanner from './scanner';

@@ -13,7 +13,7 @@ export const POST: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      yield* YouTubeDownloads.use((downloads) => downloads.retry(id));
+      yield* YouTubeDownloads.Service.use((downloads) => downloads.retry(id));
     }),
     { success: () => new Response(null, { status: 202 }), failure: youtubeFailure },
   );

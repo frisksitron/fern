@@ -1,5 +1,6 @@
+import { NodeServices } from '@effect/platform-node';
 import { Effect, Layer, ManagedRuntime } from 'effect';
-import { FernConfig, FernConfigLive } from './config';
+import { FernConfig } from './config';
 import { Database } from './db/service';
 import { loggingLayer } from './logging';
 import { MediaLibrary } from './media/library';
@@ -14,44 +15,30 @@ import { Transcoding } from './transcoding/service';
 import { YouTubeDownloads } from './youtube/service';
 import { ZeroServer } from './zero/service';
 
+// Each `defaultLayer` wires its own dependencies. Layers are memoized by reference, so a dependency
+// several services share (configuration, the database pool, the process runner, the scan worker,
+// and the scan event hub that the scanner publishes to and event streams subscribe to) is built
+// once for the whole runtime.
+const AppLayer = Layer.mergeAll(
+  // The platform services, for routes that serve files.
+  NodeServices.layer,
+  Database.defaultLayer,
+  MediaRoots.defaultLayer,
+  MediaLibrary.defaultLayer,
+  Playback.defaultLayer,
+  Scans.defaultLayer,
+  ScanEvents.defaultLayer,
+  Transcoding.defaultLayer,
+  Thumbnails.defaultLayer,
+  TrackMaps.defaultLayer,
+  Health.defaultLayer,
+  YouTubeDownloads.defaultLayer,
+  ZeroServer.defaultLayer,
+  // Logging applies to everything the runtime runs, including layer construction.
+).pipe(Layer.provide(loggingLayer.pipe(Layer.provide(FernConfig.defaultLayer))));
+
 /** Services available to route handlers and page loads. */
-export type AppServices =
-  | Database
-  | MediaRoots
-  | MediaLibrary
-  | Playback
-  | Scans
-  | ScanEvents
-  | Transcoding
-  | Thumbnails
-  | TrackMaps
-  | Health
-  | YouTubeDownloads
-  | ZeroServer;
-
-// Each service's `layer` wires its own dependencies. Layers are shared by reference, so a
-// dependency used by several services (the process runner, the scan worker) is built once. The
-// root supplies what everything shares: configuration, the database, and the scan event hub, which
-// the scanner publishes to and event streams subscribe to.
-const Infrastructure = Layer.mergeAll(Database.layer, ScanEvents.layer).pipe(Layer.provideMerge(FernConfigLive));
-
-// Logging applies to everything the runtime runs, including layer construction.
-const Logging = Layer.unwrap(FernConfig.use((config) => Effect.succeed(loggingLayer(config)))).pipe(
-  Layer.provide(FernConfigLive),
-);
-
-const AppLayer: Layer.Layer<AppServices> = Layer.mergeAll(
-  MediaRoots.layer,
-  MediaLibrary.layer,
-  Playback.layer,
-  Scans.layer,
-  Transcoding.layer,
-  Thumbnails.layer,
-  TrackMaps.layer,
-  Health.layer,
-  YouTubeDownloads.layer,
-  ZeroServer.layer,
-).pipe(Layer.provideMerge(Infrastructure), Layer.provide(Logging));
+export type AppServices = Layer.Success<typeof AppLayer>;
 
 type AppRuntime = ManagedRuntime.ManagedRuntime<AppServices, never>;
 

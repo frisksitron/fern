@@ -13,7 +13,7 @@ export const POST: RequestHandler = ({ request }) =>
     request,
     Effect.gen(function* () {
       const { url } = yield* readJsonBody(request, decodeBody);
-      const downloadId = yield* YouTubeDownloads.use((downloads) => downloads.start(url));
+      const downloadId = yield* YouTubeDownloads.Service.use((downloads) => downloads.start(url));
       return yield* jsonResponse(StartYouTubeDownloadResponse, { downloadId }, { status: 202 });
     }),
     { success: (response) => response, failure: youtubeFailure },

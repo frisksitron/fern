@@ -14,7 +14,7 @@ type ToolFailure =
   DatabaseUnavailable | ProfileNotFound | DirectoryNotFound | PlaylistNotFound | ArtistNotFound | PlaylistOrderMismatch;
 
 /** Runs a tool's program for the current request. */
-export type ToolRunner = <A>(program: Effect.Effect<A, ToolFailure, Database>) => Promise<A>;
+export type ToolRunner = <A>(program: Effect.Effect<A, ToolFailure, Database.Service>) => Promise<A>;
 
 export function toolFailureMessage(error: ToolFailure) {
   switch (error._tag) {

@@ -21,7 +21,7 @@ export const MediaTrack = Schema.Struct({
   width: OptionalPositive,
   height: OptionalPositive,
 });
-export type MediaTrack = typeof MediaTrack.Type;
+export interface MediaTrack extends Schema.Schema.Type<typeof MediaTrack> {}
 
 /** A subtitle file next to the video, served as WebVTT from `/api/subtitles/:id`. */
 export const ExternalSubtitle = Schema.Struct({
@@ -31,7 +31,7 @@ export const ExternalSubtitle = Schema.Struct({
   format: Schema.Literals(['srt', 'vtt']),
   language: Schema.NullOr(Schema.String),
 });
-export type ExternalSubtitle = typeof ExternalSubtitle.Type;
+export interface ExternalSubtitle extends Schema.Schema.Type<typeof ExternalSubtitle> {}
 
 export const SubtitleTrack = Schema.Union([MediaTrack, ExternalSubtitle]);
 export type SubtitleTrack = typeof SubtitleTrack.Type;
@@ -55,10 +55,10 @@ export type PlaybackCapabilities = { readonly h264: boolean; readonly aac: boole
 
 /** `POST /api/playback/:id/session` body. Without `audioStream`, the default audio track is used. */
 export const CreateHlsSessionRequest = Schema.Struct({ audioStream: Schema.optionalKey(Schema.NullOr(Index)) });
-export type CreateHlsSessionRequest = typeof CreateHlsSessionRequest.Type;
+export interface CreateHlsSessionRequest extends Schema.Schema.Type<typeof CreateHlsSessionRequest> {}
 
 export const HlsSession = Schema.Struct({ sessionId: HlsSessionId, manifestUrl: Schema.String });
-export type HlsSession = typeof HlsSession.Type;
+export interface HlsSession extends Schema.Schema.Type<typeof HlsSession> {}
 
 /** `session.json` in an HLS cache directory. Read back from disk, so it is decoded, not trusted. */
 export const HlsSessionMetadata = Schema.Struct({
@@ -69,4 +69,4 @@ export const HlsSessionMetadata = Schema.Struct({
   mtimeMs: Schema.Finite,
   accelerator: Schema.Literals(['nvenc', 'qsv', 'software']),
 });
-export type HlsSessionMetadata = typeof HlsSessionMetadata.Type;
+export interface HlsSessionMetadata extends Schema.Schema.Type<typeof HlsSessionMetadata> {}

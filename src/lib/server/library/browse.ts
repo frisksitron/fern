@@ -9,26 +9,24 @@ import { toProgress } from './rows';
 import { countRows, type QueryStats } from './stats';
 
 /** A video folder and the profile's progress on the videos in it; nothing outside the folder is read. */
-export function loadBrowseSnapshot(
+export const loadBrowseSnapshot = Effect.fn('loadBrowseSnapshot')(function* (
   profileId: ProfileId,
   rootId: MediaRootId | null = null,
   folderId: MediaEntryId | null = null,
   stats: QueryStats = { queries: 0, rows: 0 },
 ) {
-  return Effect.gen(function* () {
-    const folder = yield* loadMediaFolder('video', rootId, folderId, stats);
-    const mediaIds = folder.entries.filter((entry) => entry.kind === 'file').map((entry) => entry.id);
-    const progressRows = mediaIds.length
-      ? yield* countRows(
-          stats,
-          query((db) =>
-            db
-              .select()
-              .from(playbackProgress)
-              .where(and(eq(playbackProgress.profileId, profileId), inArray(playbackProgress.mediaEntryId, mediaIds))),
-          ),
-        )
-      : [];
-    return { ...folder, folderProgress: progressRows.map(toProgress) } satisfies BrowseSnapshot;
-  });
-}
+  const folder = yield* loadMediaFolder('video', rootId, folderId, stats);
+  const mediaIds = folder.entries.filter((entry) => entry.kind === 'file').map((entry) => entry.id);
+  const progressRows = mediaIds.length
+    ? yield* countRows(
+        stats,
+        query((db) =>
+          db
+            .select()
+            .from(playbackProgress)
+            .where(and(eq(playbackProgress.profileId, profileId), inArray(playbackProgress.mediaEntryId, mediaIds))),
+        ),
+      )
+    : [];
+  return { ...folder, folderProgress: progressRows.map(toProgress) } satisfies BrowseSnapshot;
+});

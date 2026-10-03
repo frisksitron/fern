@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { describeYtDlpFailure, lineReader, parseYtDlpLine, ytDlpArgs } from '../../src/lib/server/youtube/yt-dlp';
+import path from 'node:path';
+import {
+  describeYtDlpFailure,
+  libraryRelativePath,
+  parseYtDlpLine,
+  ytDlpArgs,
+} from '../../src/lib/server/youtube/yt-dlp';
 import { youtubeVideoId, youtubeWatchUrl } from '../../src/lib/shared/youtube';
 
 describe('youtubeVideoId', () => {
@@ -66,6 +72,47 @@ describe('yt-dlp', () => {
     expect(args.slice(-2)).toEqual(['--', 'https://www.youtube.com/watch?v=rBarjCP_KUs']);
   });
 
+  it('names files so they stay visible, below the library, and within file name limits', () => {
+    const args = ytDlpArgs({
+      url: 'https://www.youtube.com/watch?v=rBarjCP_KUs',
+      libraryPath: '/downloads',
+      stagingPath: '/downloads/.downloading/1',
+      nodePath: '/usr/local/bin/node',
+      ffmpegLocation: null,
+    });
+    // Leading dots and spaces are stripped from every part of the name.
+    const replace = args.indexOf('--replace-in-metadata');
+    expect(args.slice(replace, replace + 4)).toEqual([
+      '--replace-in-metadata',
+      'title,channel,uploader',
+      '^[.\\s]+',
+      '',
+    ]);
+    expect(new RegExp(args[replace + 2]!).test('  ..hidden')).toBe(true);
+    expect('  ..hidden'.replace(new RegExp(args[replace + 2]!), '')).toBe('hidden');
+    // Each name is cut to bytes, not characters, and ends well below 255 bytes with its ID and extension.
+    expect(args[args.indexOf('--output') + 1]).toBe('%(channel,uploader|YouTube).100B/%(title).180B [%(id)s].%(ext)s');
+  });
+
+  it('accepts only files below the library that scans can see', () => {
+    const library = path.resolve('/downloads');
+    const inside = (...parts: string[]) => path.join(library, ...parts);
+    expect(libraryRelativePath(library, inside('Chrysalis', 'Late Mix [rBarjCP_KUs].opus'))).toBe(
+      'Chrysalis/Late Mix [rBarjCP_KUs].opus',
+    );
+    expect(libraryRelativePath(library, inside('Late...Mix [rBarjCP_KUs].opus'))).toBe('Late...Mix [rBarjCP_KUs].opus');
+    // Outside the library, or the library itself.
+    expect(libraryRelativePath(library, path.resolve('/elsewhere/a.opus'))).toBeNull();
+    expect(libraryRelativePath(library, inside('..', 'a.opus'))).toBeNull();
+    expect(libraryRelativePath(library, `${library}-other${path.sep}a.opus`)).toBeNull();
+    expect(libraryRelativePath(library, library)).toBeNull();
+    // Dot parts: hidden folders and files are skipped by scans.
+    expect(libraryRelativePath(library, inside('.hidden', 'a.opus'))).toBeNull();
+    expect(libraryRelativePath(library, inside('.downloading', '1', 'a.opus'))).toBeNull();
+    expect(libraryRelativePath(library, inside('Chrysalis', '.a.opus'))).toBeNull();
+    expect(libraryRelativePath(library, inside('Chrysalis', '..', '..', 'a.opus'))).toBeNull();
+  });
+
   it('parses the lines Fern asks for and ignores the rest', () => {
     expect(
       parseYtDlpLine('[fern:info] {"title": "overtime", "channel": "Chrysalis", "uploader": "x", "duration": 6976}'),
@@ -89,20 +136,13 @@ describe('yt-dlp', () => {
     });
     expect(parseYtDlpLine('[youtube] rBarjCP_KUs: Downloading webpage')).toBeNull();
     expect(parseYtDlpLine('[fern:info] {broken')).toBeNull();
+    expect(parseYtDlpLine('[fern:info] {"title": "  ", "uploader": " Someone ", "duration": -1}')).toEqual({
+      type: 'info',
+      title: null,
+      channel: 'Someone',
+      durationMs: null,
+    });
     expect(parseYtDlpLine('[fern:progress] NA NA')).toBeNull();
-  });
-
-  it('reassembles lines and characters split across chunks', () => {
-    const lines: string[] = [];
-    const reader = lineReader((line) => lines.push(line));
-    const text = Buffer.from('[fern:progress] 1 2\r\n[fern:saved] /d/Ünïcode ｜ mix.opus\n[fern:progress] 3');
-    // Split inside the multi-byte "｜".
-    const cut = text.indexOf(Buffer.from('｜')) + 1;
-    reader.push(text.subarray(0, cut));
-    reader.push(text.subarray(cut));
-    expect(lines).toEqual(['[fern:progress] 1 2', '[fern:saved] /d/Ünïcode ｜ mix.opus']);
-    reader.end();
-    expect(lines.at(-1)).toBe('[fern:progress] 3');
   });
 
   it('explains failures without passing on arbitrary output', () => {

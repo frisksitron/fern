@@ -1,10 +1,10 @@
-import { Data, Effect, Logger, ManagedRuntime, References } from 'effect';
+import { Effect, Logger, ManagedRuntime, References, Schema } from 'effect';
 import { afterEach, describe, expect, it } from 'vitest';
 import { respondOn } from '../../src/lib/server/http';
 import type { PublicError } from '../../src/lib/server/public-errors';
 
-class Missing extends Data.TaggedError('Missing')<object> {}
-class Unavailable extends Data.TaggedError('Unavailable')<object> {}
+class Missing extends Schema.TaggedError<Missing>()('Missing', {}) {}
+class Unavailable extends Schema.TaggedError<Unavailable>()('Unavailable', {}) {}
 
 type Entry = { level: string; message: unknown; annotations: Record<string, unknown> };
 

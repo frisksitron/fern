@@ -11,26 +11,41 @@ import { schema } from '$lib/zero/schema';
 /** Connections for server mutators. Mutations are small, short transactions. */
 const MUTATION_CONNECTIONS = 4;
 
+/** Zero's server endpoints: authoritative mutations and query transforms. */
+export interface Interface {
+  /** Zero's push endpoint: runs client mutations. Mutator errors are reported in the result. */
+  readonly mutate: (request: Request) => Effect.Effect<Awaited<ReturnType<typeof handleMutateRequest>>>;
+  /** Zero's query endpoint: transforms named queries into ZQL for zero-cache. */
+  readonly query: (request: Request) => Effect.Effect<Awaited<ReturnType<typeof handleQueryRequest>>>;
+}
+
+export class Service extends Context.Service<Service, Interface>()('@fern/ZeroServer') {}
+
 /**
- * Zero's server endpoints: authoritative mutations and query transforms. Mutators run ZQL through
- * Zero's node-postgres adapter on a small pool of their own, closed when the runtime shuts down.
+ * Requires `FernConfig`. Mutators run ZQL through Zero's node-postgres adapter on a small pool of
+ * their own, closed when the layer is released.
  */
-export class ZeroServer extends Context.Service<ZeroServer>()('fern/ZeroServer', {
-  make: Effect.gen(function* () {
-    const { DATABASE_URL } = yield* FernConfig;
-    const fork = yield* Effect.context<never>().pipe(Effect.map((context) => Effect.runForkWith(context)));
+export const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const config = yield* FernConfig.Service;
+    // Runs the pool's error log on this layer's services, from outside any fiber.
+    const runFork = Effect.runForkWith(yield* Effect.context<never>());
     const pool = yield* Effect.acquireRelease(
       Effect.sync(() => {
-        const created = new pg.Pool({ connectionString: Redacted.value(DATABASE_URL), max: MUTATION_CONNECTIONS });
+        const created = new pg.Pool({
+          connectionString: Redacted.value(config.DATABASE_URL),
+          max: MUTATION_CONNECTIONS,
+        });
         // An idle connection that breaks emits `error` on the pool; unhandled, it would stop the process.
-        created.on('error', (cause) => fork(Effect.logWarning('An idle Zero database connection failed', cause)));
+        created.on('error', (cause) => runFork(Effect.logWarning('An idle Zero database connection failed', cause)));
         return created;
       }),
       (created) => Effect.promise(() => created.end()),
     );
     const dbProvider = zeroNodePg(schema, pool);
 
-    const mutate = (request: Request) =>
+    const mutate = Effect.fn('ZeroServer.mutate')((request: Request) =>
       Effect.promise(() =>
         handleMutateRequest({
           dbProvider,
@@ -38,9 +53,10 @@ export class ZeroServer extends Context.Service<ZeroServer>()('fern/ZeroServer',
           request,
           userID: null,
         }),
-      ).pipe(Effect.withSpan('zero.mutate'));
+      ),
+    );
 
-    const query = (request: Request) =>
+    const query = Effect.fn('ZeroServer.query')((request: Request) =>
       Effect.promise(() =>
         handleQueryRequest({
           handler: (name, args) => mustGetQuery(queries, name).fn({ args }),
@@ -48,11 +64,13 @@ export class ZeroServer extends Context.Service<ZeroServer>()('fern/ZeroServer',
           request,
           userID: null,
         }),
-      ).pipe(Effect.withSpan('zero.query'));
+      ),
+    );
 
-    return { mutate, query } as const;
+    return Service.of({ mutate, query });
   }),
-}) {
-  /** Requires `FernConfig`. */
-  static readonly layer = Layer.effect(this, this.make);
-}
+);
+
+export const defaultLayer = layer.pipe(Layer.provide(FernConfig.defaultLayer));
+
+export * as ZeroServer from './service';

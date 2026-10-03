@@ -12,8 +12,8 @@ export type YouTubeDownloadState = typeof YouTubeDownloadState.Type;
 export const StartYouTubeDownloadRequest = Schema.Struct({
   url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2000)),
 });
-export type StartYouTubeDownloadRequest = typeof StartYouTubeDownloadRequest.Type;
+export interface StartYouTubeDownloadRequest extends Schema.Schema.Type<typeof StartYouTubeDownloadRequest> {}
 
 /** `202` response of `POST /api/youtube/downloads`. Progress is synchronized by Zero. */
 export const StartYouTubeDownloadResponse = Schema.Struct({ downloadId: YouTubeDownloadId });
-export type StartYouTubeDownloadResponse = typeof StartYouTubeDownloadResponse.Type;
+export interface StartYouTubeDownloadResponse extends Schema.Schema.Type<typeof StartYouTubeDownloadResponse> {}

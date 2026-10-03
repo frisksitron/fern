@@ -30,7 +30,7 @@ export const GET: RequestHandler = ({ request, url }) =>
     request,
     Effect.gen(function* () {
       const query = yield* decodeInput(Object.fromEntries(url.searchParams), decodeQuery);
-      const ids = yield* MediaLibrary.use((library) => library.folderTracks(query.root, query.folder ?? null));
+      const ids = yield* MediaLibrary.Service.use((library) => library.folderTracks(query.root, query.folder ?? null));
       return yield* jsonResponse(FolderTracksResponse, { ids });
     }),
     { success: (response) => response, failure },

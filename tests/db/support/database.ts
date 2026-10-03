@@ -1,47 +1,47 @@
 import { randomBytes } from 'node:crypto';
 import { PgClient } from '@effect/sql-pg';
-import { Effect, Layer, ManagedRuntime, Redacted } from 'effect';
-import pg from 'pg';
+import { Context, Effect, Layer, Redacted } from 'effect';
+import { SqlClient } from 'effect/sql';
 import { inject } from 'vitest';
-import { Database, type FernDatabase } from '../../../src/lib/server/db/service';
+import { Database } from '../../../src/lib/server/db/service';
 import { databaseUrl, dropDatabase, quoteIdentifier, withAdminClient } from './postgres';
 
-export type TestDatabase = Awaited<ReturnType<typeof createTestDatabase>>;
+/** The disposable database a test block runs against. */
+export class Service extends Context.Service<Service, { readonly name: string; readonly url: string }>()(
+  'test/TestDatabase',
+) {}
 
-/** Creates an isolated, fully migrated database cloned from the run's template. */
-export async function createTestDatabase() {
-  const name = `fern_test_${randomBytes(8).toString('hex')}`;
-  const template = inject('templateDatabase');
-  await withAdminClient((client) =>
-    client.query(`create database ${quoteIdentifier(name)} template ${quoteIdentifier(template)}`),
-  );
-  const url = databaseUrl(name);
-  /** The application's `Database` (and its `PgClient`) on this database, as services use it. */
-  const layer = Database.layerWithoutDependencies.pipe(
-    Layer.provideMerge(PgClient.layer({ url: Redacted.make(url), maxConnections: 5 })),
-    Layer.orDie,
-  );
-  const runtime = ManagedRuntime.make(layer);
-  // Plain node-postgres for fixtures and assertions that are clearer in SQL.
-  const pool = new pg.Pool({ connectionString: url, max: 5 });
-  return {
-    name,
-    url,
-    pool,
-    layer,
-    /** Runs a program that uses the database, such as a query or a loader. */
-    run: <A, E>(program: Effect.Effect<A, E, Database | PgClient.PgClient>) => runtime.runPromise(program),
-    /** Runs one Drizzle statement or transaction. */
-    query: <A, E>(statement: (db: FernDatabase) => Effect.Effect<A, E>) =>
-      runtime.runPromise(
-        Effect.gen(function* () {
-          return yield* statement(yield* Database);
-        }),
-      ),
-    async drop() {
-      await runtime.dispose();
-      await pool.end();
-      await dropDatabase(name);
-    },
-  };
-}
+/** Clones the run's migrated template into a new database, dropped when the scope closes. */
+const clone = Effect.acquireRelease(
+  Effect.promise(async () => {
+    const name = `fern_test_${randomBytes(8).toString('hex')}`;
+    const template = inject('templateDatabase');
+    await withAdminClient((client) =>
+      client.query(`create database ${quoteIdentifier(name)} template ${quoteIdentifier(template)}`),
+    );
+    return { name, url: databaseUrl(name) };
+  }),
+  (database) => Effect.promise(() => dropDatabase(database.name)),
+);
+
+/**
+ * An isolated, fully migrated database for a `layer(...)` block: the application's `Database` on
+ * it, and its `SqlClient` for fixtures and assertions that read more clearly as plain SQL.
+ */
+export const layer = Layer.unwrap(
+  Effect.map(clone, (database) =>
+    Database.layer.pipe(
+      Layer.provideMerge(PgClient.layer({ url: Redacted.make(database.url), maxConnections: 5 })),
+      Layer.orDie,
+      Layer.merge(Layer.succeed(Service, database)),
+    ),
+  ),
+);
+
+/** Empties the given tables (and everything that references them), for a test that needs a clean slate. */
+export const truncate = Effect.fnUntraced(function* (...tables: ReadonlyArray<string>) {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql.unsafe(`truncate ${tables.join(', ')} cascade`).pipe(Effect.orDie);
+});
+
+export * as TestDatabase from './database';

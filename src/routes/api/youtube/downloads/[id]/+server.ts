@@ -13,7 +13,7 @@ export const DELETE: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      yield* YouTubeDownloads.use((downloads) => downloads.dismiss(id));
+      yield* YouTubeDownloads.Service.use((downloads) => downloads.dismiss(id));
     }),
     { success: () => new Response(null, { status: 204 }), failure: youtubeFailure },
   );

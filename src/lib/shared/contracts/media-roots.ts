@@ -9,7 +9,7 @@ export const CreateMediaRootRequest = Schema.Struct({
   path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
   mediaType: MediaType,
 });
-export type CreateMediaRootRequest = typeof CreateMediaRootRequest.Type;
+export interface CreateMediaRootRequest extends Schema.Schema.Type<typeof CreateMediaRootRequest> {}
 
 export const MediaRootSummary = Schema.Struct({
   id: MediaRootId,
@@ -18,11 +18,11 @@ export const MediaRootSummary = Schema.Struct({
   mediaType: MediaType,
   displayOrder: Schema.Number,
 });
-export type MediaRootSummary = typeof MediaRootSummary.Type;
+export interface MediaRootSummary extends Schema.Schema.Type<typeof MediaRootSummary> {}
 
 /** `201` response of `POST /api/media-roots`. */
 export const CreateMediaRootResponse = Schema.Struct({ root: MediaRootSummary });
-export type CreateMediaRootResponse = typeof CreateMediaRootResponse.Type;
+export interface CreateMediaRootResponse extends Schema.Schema.Type<typeof CreateMediaRootResponse> {}
 
 export type DirectoryEntry = { readonly name: string; readonly path: string };
 

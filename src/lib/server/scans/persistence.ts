@@ -10,15 +10,16 @@ import {
   scanErrors,
   scanRuns,
 } from '$lib/server/db/schema';
-import {
-  orUnavailable,
-  type DatabaseUnavailable,
-  type FernDatabase,
-  type FernTransaction,
-} from '$lib/server/db/service';
+import { orUnavailable, type Database, type DatabaseUnavailable } from '$lib/server/db/service';
 import type { NormalizedTrack, ProbeResult } from '$lib/server/media/probe';
 import type { ScanCounts, ScanState } from '$lib/shared/contracts/scans';
-import { PROBE_VERSION, type ExistingEntry, type PlannedEntry, type SubtitleAssociation } from './plan';
+import {
+  PROBE_VERSION,
+  type ExistingEntry,
+  type ExistingSubtitle,
+  type PlannedEntry,
+  type SubtitleAssociation,
+} from './plan';
 import { statesBefore } from './state';
 
 /** Rows per multi-row statement: large enough to batch, small enough to stay well under parameter limits. */
@@ -44,7 +45,7 @@ export type ProbeOutcome =
 
 /** The statement that moves a scan to `to` only from a state allowed to reach it; for use in transactions. */
 export function transitionScanStatement(
-  db: FernDatabase | FernTransaction,
+  db: Database.Client | Database.Transaction,
   scanId: string,
   to: ScanState,
   fields: Partial<typeof scanRuns.$inferInsert> = {},
@@ -58,7 +59,7 @@ export function transitionScanStatement(
 
 /** Moves a scan to `to` only from a state allowed to reach it. Returns whether the row changed. */
 export function transitionScan(
-  db: FernDatabase,
+  db: Database.Client,
   scanId: string,
   to: ScanState,
   fields: Partial<typeof scanRuns.$inferInsert> = {},
@@ -66,21 +67,21 @@ export function transitionScan(
   return orUnavailable(transitionScanStatement(db, scanId, to, fields)).pipe(Effect.map((rows) => rows.length > 0));
 }
 
-export function loadScan(db: FernDatabase, scanId: string) {
+export function loadScan(db: Database.Client, scanId: string) {
   return orUnavailable(db.select().from(scanRuns).where(eq(scanRuns.id, scanId)).limit(1)).pipe(
     Effect.map((rows) => rows[0]),
   );
 }
 
 export function writeProgress(
-  db: FernDatabase,
+  db: Database.Client,
   scanId: string,
   progress: ScanCounts & { currentRootId: string | null; currentPath: string | null },
 ) {
   return orUnavailable(db.update(scanRuns).set(progress).where(eq(scanRuns.id, scanId)));
 }
 
-export function loadRoots(db: FernDatabase, rootId: string | null) {
+export function loadRoots(db: Database.Client, rootId: string | null) {
   return orUnavailable(
     rootId
       ? db.select().from(mediaRoots).where(eq(mediaRoots.id, rootId))
@@ -89,7 +90,7 @@ export function loadRoots(db: FernDatabase, rootId: string | null) {
 }
 
 /** One query for every stored entry of a root, instead of one per discovered file. */
-export function loadExistingEntries(db: FernDatabase, rootId: string) {
+export function loadExistingEntries(db: Database.Client, rootId: string) {
   return orUnavailable(
     db
       .select({
@@ -114,7 +115,7 @@ export function loadExistingEntries(db: FernDatabase, rootId: string) {
 }
 
 /** Writes changed entries in order (parents first), a batch per statement. Returns the statement count. */
-export function upsertEntries(db: FernDatabase, rootId: string, scanId: string, entries: readonly PlannedEntry[]) {
+export function upsertEntries(db: Database.Client, rootId: string, scanId: string, entries: readonly PlannedEntry[]) {
   const batches = chunks(entries, WRITE_BATCH_SIZE);
   return Effect.forEach(
     batches,
@@ -162,7 +163,7 @@ export function upsertEntries(db: FernDatabase, rootId: string, scanId: string, 
   ).pipe(Effect.as(batches.length));
 }
 
-export function softDeleteEntries(db: FernDatabase, ids: readonly string[]) {
+export function softDeleteEntries(db: Database.Client, ids: readonly string[]) {
   return Effect.forEach(
     chunks(ids, WRITE_BATCH_SIZE),
     (batch) =>
@@ -182,7 +183,7 @@ function trackRows(entryId: string, tracks: readonly NormalizedTrack[]) {
 
 /** Stores one batch of probe results in a single transaction, replacing each entry's tracks and chapters. */
 export function writeProbeOutcomes(
-  db: FernDatabase,
+  db: Database.Client,
   scanId: string,
   rootId: string,
   outcomes: readonly ProbeOutcome[],
@@ -256,7 +257,7 @@ export function writeProbeOutcomes(
   );
 }
 
-export function upsertSubtitles(db: FernDatabase, associations: readonly SubtitleAssociation[]) {
+export function upsertSubtitles(db: Database.Client, associations: readonly SubtitleAssociation[]) {
   return Effect.forEach(
     chunks(associations, WRITE_BATCH_SIZE),
     (batch) =>
@@ -273,9 +274,38 @@ export function upsertSubtitles(db: FernDatabase, associations: readonly Subtitl
   );
 }
 
+/** The root's subtitle rows that are still active, one query for all of them. */
+export function loadActiveSubtitles(db: Database.Client, rootId: string) {
+  return orUnavailable(
+    db
+      .select({
+        id: externalSubtitles.id,
+        mediaEntryId: externalSubtitles.mediaEntryId,
+        relativePath: externalSubtitles.relativePath,
+      })
+      .from(externalSubtitles)
+      .innerJoin(mediaEntries, eq(externalSubtitles.mediaEntryId, mediaEntries.id))
+      .where(and(eq(mediaEntries.mediaRootId, rootId), isNull(externalSubtitles.deletedAt))),
+  ) as Effect.Effect<ExistingSubtitle[], DatabaseUnavailable>;
+}
+
+export function softDeleteSubtitles(db: Database.Client, ids: readonly string[]) {
+  return Effect.forEach(
+    chunks(ids, WRITE_BATCH_SIZE),
+    (batch) =>
+      orUnavailable(
+        db
+          .update(externalSubtitles)
+          .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
+          .where(and(inArray(externalSubtitles.id, batch), isNull(externalSubtitles.deletedAt))),
+      ),
+    { discard: true },
+  );
+}
+
 /** Applies artwork changes with one UPDATE … FROM (VALUES …) per batch. */
 export function updateArtwork(
-  db: FernDatabase,
+  db: Database.Client,
   changes: ReadonlyArray<{ readonly id: string; readonly artworkId: string | null }>,
 ) {
   return Effect.forEach(
@@ -295,7 +325,7 @@ export function updateArtwork(
   );
 }
 
-export function recordScanErrors(db: FernDatabase, scanId: string, rows: readonly ScanErrorRow[]) {
+export function recordScanErrors(db: Database.Client, scanId: string, rows: readonly ScanErrorRow[]) {
   if (!rows.length) return Effect.void;
   return Effect.forEach(
     chunks(rows, WRITE_BATCH_SIZE),
@@ -308,11 +338,11 @@ export function recordScanErrors(db: FernDatabase, scanId: string, rows: readonl
 }
 
 /** A retried scan starts its error list afresh. */
-export function clearScanErrors(db: FernDatabase, scanId: string) {
+export function clearScanErrors(db: Database.Client, scanId: string) {
   return orUnavailable(db.delete(scanErrors).where(eq(scanErrors.scanRunId, scanId)));
 }
 
-export function markRootScanned(db: FernDatabase, rootId: string) {
+export function markRootScanned(db: Database.Client, rootId: string) {
   return orUnavailable(
     db
       .update(mediaRoots)

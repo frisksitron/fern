@@ -1,11 +1,11 @@
 import { sql } from 'drizzle-orm';
-import { Data, Effect } from 'effect';
-import { orUnavailable, type FernDatabase } from '$lib/server/db/service';
+import { Effect, Schema } from 'effect';
+import { orUnavailable, type Database } from '$lib/server/db/service';
 import type { MediaEntryId } from '$lib/shared/contracts/ids';
 import { FOLDER_TRACK_LIMIT } from '$lib/shared/contracts/music';
 
 /** The folder holds more tracks than one playlist change may add. */
-export class FolderTooLarge extends Data.TaggedError('FolderTooLarge')<{ readonly limit: number }> {}
+export class FolderTooLarge extends Schema.TaggedError<FolderTooLarge>()('FolderTooLarge', { limit: Schema.Number }) {}
 
 /**
  * The audio tracks in a folder and every folder below it, in album order. The recursive query walks
@@ -33,13 +33,15 @@ export function folderTracksQuery(rootId: string, folderId: string | null, limit
     limit ${limit}`;
 }
 
-export function folderTrackIds(db: FernDatabase, rootId: string, folderId: string | null) {
-  return Effect.gen(function* () {
-    const rows = yield* orUnavailable(
-      db.execute<{ id: string }>(folderTracksQuery(rootId, folderId, FOLDER_TRACK_LIMIT + 1), 'objects'),
-    );
-    if (rows.length > FOLDER_TRACK_LIMIT) return yield* new FolderTooLarge({ limit: FOLDER_TRACK_LIMIT });
-    // IDs come from Fern's own database, so they are trusted and cast rather than decoded.
-    return rows.map((row) => row.id as MediaEntryId);
-  });
-}
+export const folderTrackIds = Effect.fnUntraced(function* (
+  db: Database.Client,
+  rootId: string,
+  folderId: string | null,
+) {
+  const rows = yield* orUnavailable(
+    db.execute<{ id: string }>(folderTracksQuery(rootId, folderId, FOLDER_TRACK_LIMIT + 1), 'objects'),
+  );
+  if (rows.length > FOLDER_TRACK_LIMIT) return yield* new FolderTooLarge({ limit: FOLDER_TRACK_LIMIT });
+  // IDs come from Fern's own database, so they are trusted and cast rather than decoded.
+  return rows.map((row) => row.id as MediaEntryId);
+});

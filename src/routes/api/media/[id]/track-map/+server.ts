@@ -13,7 +13,7 @@ export const GET: RequestHandler = ({ params, request }) =>
     request,
     Effect.gen(function* () {
       const { id } = yield* decodeInput(params, decodeParams);
-      return yield* TrackMaps.use((trackMaps) => trackMaps.trackMapOf(id));
+      return yield* TrackMaps.Service.use((trackMaps) => trackMaps.trackMapOf(id));
     }),
     {
       success: (trackMap) =>
