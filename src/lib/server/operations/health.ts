@@ -35,8 +35,13 @@ export const layer = Layer.effect(
       Effect.all({ ffmpeg: executable('ffmpeg'), ffprobe: executable('ffprobe') }, { concurrency: 2 }),
       '1 minute',
     );
-    // A volume mounted with the wrong owner leaves these unwritable while everything else works.
-    const writable = (directory: string) => check(fs.access(directory, { writable: true }), '2 seconds');
+    // A volume mounted with the wrong owner leaves these unwritable while everything else works. A
+    // missing folder is fine as long as it can be created: the services create theirs on first use.
+    const writable = (directory: string) =>
+      check(
+        fs.makeDirectory(directory, { recursive: true }).pipe(Effect.andThen(fs.access(directory, { writable: true }))),
+        '2 seconds',
+      );
 
     const readiness = Effect.fn('Health.readiness')(function* () {
       const [database, programs, folders] = yield* Effect.all(

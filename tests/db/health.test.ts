@@ -18,10 +18,13 @@ const allOk = {
 
 /**
  * Health on the test database, with a fake process runner where `missing` programs are not installed
- * and the cache and downloads folders in a temporary directory (`absent` ones are not created).
+ * and the cache and downloads folders in a temporary directory. `absent` folders don't exist yet;
+ * `blocked` ones can't be created, because their parent is a file.
  */
-function health(options: { missing?: readonly string[]; absent?: readonly string[] } = {}) {
-  const { missing = [], absent = [] } = options;
+function health(
+  options: { missing?: readonly string[]; absent?: readonly string[]; blocked?: readonly string[] } = {},
+) {
+  const { missing = [], absent = [], blocked = [] } = options;
   const media = Layer.mock(MediaProcess.Service, {
     run: (request) =>
       missing.includes(request.program)
@@ -32,14 +35,17 @@ function health(options: { missing?: readonly string[]; absent?: readonly string
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: 'fern-health-' });
+      yield* fs.writeFileString(`${root}/file`, '');
+      const folder = (name: string, directory: string) =>
+        blocked.includes(name) ? `${root}/file/${directory}` : `${root}/${directory}`;
       const folders = {
-        HLS_CACHE_DIR: `${root}/hls`,
-        THUMBNAIL_CACHE_DIR: `${root}/thumbnails`,
-        TRACK_MAP_CACHE_DIR: `${root}/track-maps`,
-        DOWNLOADS_DIR: `${root}/downloads`,
+        HLS_CACHE_DIR: folder('HLS_CACHE_DIR', 'hls'),
+        THUMBNAIL_CACHE_DIR: folder('THUMBNAIL_CACHE_DIR', 'thumbnails'),
+        TRACK_MAP_CACHE_DIR: folder('TRACK_MAP_CACHE_DIR', 'track-maps'),
+        DOWNLOADS_DIR: folder('DOWNLOADS_DIR', 'downloads'),
       };
       for (const [name, directory] of Object.entries(folders)) {
-        if (!absent.includes(name)) yield* fs.makeDirectory(directory);
+        if (!absent.includes(name) && !blocked.includes(name)) yield* fs.makeDirectory(directory);
       }
       return testConfig(folders);
     }),
@@ -68,6 +74,13 @@ layer(TestDatabase.layer, { excludeTestServices: true })('Health', (it) => {
     }).pipe(health({ missing: ['ffprobe'] })),
   );
 
+  it.effect('creates a missing cache or downloads folder, as the services do on first use', () =>
+    Effect.gen(function* () {
+      const service = yield* Health.Service;
+      expect(yield* service.readiness()).toEqual({ status: 'ready', checks: allOk });
+    }).pipe(health({ absent: ['HLS_CACHE_DIR', 'TRACK_MAP_CACHE_DIR'] })),
+  );
+
   it.effect('is not ready when a cache or downloads folder cannot be written', () =>
     Effect.gen(function* () {
       const service = yield* Health.Service;
@@ -75,6 +88,6 @@ layer(TestDatabase.layer, { excludeTestServices: true })('Health', (it) => {
         status: 'unavailable',
         checks: { ...allOk, hlsCache: 'unavailable', downloads: 'unavailable' },
       });
-    }).pipe(health({ absent: ['HLS_CACHE_DIR', 'DOWNLOADS_DIR'] })),
+    }).pipe(health({ blocked: ['HLS_CACHE_DIR', 'DOWNLOADS_DIR'] })),
   );
 });
